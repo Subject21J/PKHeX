@@ -15,9 +15,11 @@ namespace PKHeX.WinForms
     {
         private readonly PKMEditor PKME_Tabs;
         private readonly SaveFile SAV;
+        private readonly SAVEditor BoxView;
         public SAV_MysteryGiftDB(PKMEditor tabs, SAVEditor sav)
         {
             SAV = sav.SAV;
+            BoxView = sav;
             PKME_Tabs = tabs;
             InitializeComponent();
 
@@ -201,14 +203,7 @@ namespace PKHeX.WinForms
         }
         private void LoadDatabase()
         {
-            RawDB = new List<MysteryGift>();
-            RawDB.AddRange(Legal.MGDB_G4);
-            RawDB.AddRange(Legal.MGDB_G5);
-            RawDB.AddRange(Legal.MGDB_G6);
-            RawDB.AddRange(Legal.MGDB_G7);
-
-            RawDB = new List<MysteryGift>(RawDB.Where(mg => !mg.IsItem && mg.IsPokémon && mg.Species > 0).Distinct()
-                .Concat(Legal.MGDB_G3).OrderBy(mg => mg.Species));
+            RawDB = new List<MysteryGift>(EncounterEvent.GetAllEvents());
             foreach (var mg in RawDB)
                 mg.GiftUsed = false;
             BeginInvoke(new MethodInvoker(delegate
@@ -364,6 +359,19 @@ namespace PKHeX.WinForms
             if (!Menu_SearchAdvanced.Checked)
             { Size = MinimumSize; RTB_Instructions.Clear(); }
             else Size = MaximumSize;
+        }
+        private void Menu_Import_Click(object sender, EventArgs e)
+        {
+            if (!BoxView.GetBulkImportSettings(out var clearAll, out var noSetb))
+                return;
+
+            int box = BoxView.Box.CurrentBox;
+            if (!SAV.LoadBoxes(Results, out var result, box, clearAll, noSetb))
+                return;
+
+            BoxView.SetPKMBoxes();
+            BoxView.UpdateBoxViewers();
+            WinFormsUtil.Alert(result);
         }
 
         private void Menu_Exit_Click(object sender, EventArgs e)

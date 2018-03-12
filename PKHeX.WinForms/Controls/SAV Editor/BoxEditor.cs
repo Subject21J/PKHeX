@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
-using System.Linq;
 using System.Media;
 using System.Windows.Forms;
 using PKHeX.Core;
@@ -16,19 +15,19 @@ namespace PKHeX.WinForms.Controls
         public int BoxSlotCount { get; }
         public SlotChangeManager M { get; set; }
         public bool FlagIllegal { get; set; }
+        private const int SlotCount = 30;
 
         public BoxEditor()
         {
             InitializeComponent();
-            SlotPictureBoxes = new List<PictureBox>();
-            SlotPictureBoxes.AddRange(new[]
+            SlotPictureBoxes = new List<PictureBox>
             {
                 bpkx1, bpkx2, bpkx3, bpkx4, bpkx5, bpkx6,
                 bpkx7, bpkx8, bpkx9, bpkx10,bpkx11,bpkx12,
                 bpkx13,bpkx14,bpkx15,bpkx16,bpkx17,bpkx18,
                 bpkx19,bpkx20,bpkx21,bpkx22,bpkx23,bpkx24,
                 bpkx25,bpkx26,bpkx27,bpkx28,bpkx29,bpkx30,
-            });
+            };
             BoxSlotCount = SlotPictureBoxes.Count;
             foreach (var pb in SlotPictureBoxes)
             {
@@ -51,6 +50,11 @@ namespace PKHeX.WinForms.Controls
         {
             get => CB_BoxSelect.Enabled;
             set => CB_BoxSelect.Enabled = CB_BoxSelect.Visible = B_BoxLeft.Visible = B_BoxRight.Visible = value;
+        }
+        public bool ControlsEnabled
+        {
+            get => CB_BoxSelect.Enabled;
+            set => CB_BoxSelect.Enabled = B_BoxLeft.Enabled = B_BoxRight.Enabled = value;
         }
         public int CurrentBox
         {
@@ -88,11 +92,11 @@ namespace PKHeX.WinForms.Controls
             pb.BackColor = Color.Transparent;
             pb.Visible = true;
 
-            if (M != null && M.colorizedbox == box && M.colorizedslot == slot)
-                pb.BackgroundImage = M.colorizedcolor;
+            if (M != null && M.ColorizedBox == box && M.ColorizedSlot == slot)
+                pb.BackgroundImage = M.ColorizedColor;
         }
 
-        public void ResetBoxNames()
+        public void ResetBoxNames(int box = -1)
         {
             if (!SAV.HasBox)
                 return;
@@ -104,8 +108,10 @@ namespace PKHeX.WinForms.Controls
                 catch { getBoxNamesDefault(); }
             }
 
-            if (SAV.CurrentBox < CB_BoxSelect.Items.Count)
+            if (box < 0 && SAV.CurrentBox < CB_BoxSelect.Items.Count)
                 CurrentBox = SAV.CurrentBox; // restore selected box
+            else
+                CurrentBox = box;
 
             void getBoxNamesFromSave()
             {
@@ -116,7 +122,7 @@ namespace PKHeX.WinForms.Controls
             void getBoxNamesDefault()
             {
                 CB_BoxSelect.Items.Clear();
-                for (int i = 0; i <= SAV.BoxCount; i++)
+                for (int i = 0; i < SAV.BoxCount; i++)
                     CB_BoxSelect.Items.Add($"Box {i+1}");
             }
         }
@@ -127,7 +133,7 @@ namespace PKHeX.WinForms.Controls
             int boxbgval = SAV.GetBoxWallpaper(box);
             PAN_Box.BackgroundImage = SAV.WallpaperImage(boxbgval);
 
-            int slot = M?.colorizedbox == box ? M.colorizedslot : -1;
+            int slot = M?.ColorizedBox == box ? M.ColorizedSlot : -1;
 
             for (int i = 0; i < BoxSlotCount; i++)
             {
@@ -136,7 +142,7 @@ namespace PKHeX.WinForms.Controls
                     GetSlotFiller(boxoffset + SAV.SIZE_STORED * i, pb, box, i);
                 else
                     pb.Visible = false;
-                pb.BackgroundImage = slot == i ? M?.colorizedcolor : null;
+                pb.BackgroundImage = slot == i ? M?.ColorizedColor : null;
             }
         }
         public bool SaveBoxBinary()
@@ -163,6 +169,12 @@ namespace PKHeX.WinForms.Controls
                 return true;
             }
             return false;
+        }
+        public void ClearEvents()
+        {
+            B_BoxRight.Click -= ClickBoxRight;
+            B_BoxLeft.Click -= ClickBoxLeft;
+            CB_BoxSelect.SelectedIndexChanged -= GetBox;
         }
 
         public int GetSlot(object sender) => SlotPictureBoxes.IndexOf(WinFormsUtil.GetUnderlyingControl(sender) as PictureBox);
@@ -194,7 +206,7 @@ namespace PKHeX.WinForms.Controls
         }
         private void GetSlotFiller(int offset, PictureBox pb, int box = -1, int slot = -1)
         {
-            if (SAV.GetData(offset, SAV.SIZE_STORED).SequenceEqual(new byte[SAV.SIZE_STORED]))
+            if (SAV.IsRangeEmpty(offset, SAV.SIZE_STORED))
             {
                 // 00s present in slot.
                 pb.Image = null;
@@ -224,12 +236,11 @@ namespace PKHeX.WinForms.Controls
             if (pb.Image == null)
                 return;
             int slot = GetSlot(pb);
-            int box = slot >= 30 ? -1 : CurrentBox;
-            if (SAV.IsSlotLocked(box, slot))
+            if (slot >= SlotCount || SAV.IsSlotLocked(CurrentBox, slot))
                 return;
 
             bool encrypt = ModifierKeys == Keys.Control;
-            M.HandleMovePKM(pb, slot, box, encrypt);
+            M.HandleMovePKM(pb, slot, CurrentBox, encrypt);
         }
         private void BoxSlot_DragDrop(object sender, DragEventArgs e)
         {
@@ -239,8 +250,7 @@ namespace PKHeX.WinForms.Controls
             // Abort if there is no Pokemon in the given slot.
             PictureBox pb = (PictureBox)sender;
             int slot = GetSlot(pb);
-            int box = slot >= 30 ? -1 : CurrentBox;
-            if (SAV.IsSlotLocked(box, slot) || slot >= 36)
+            if (slot >= SlotCount || SAV.IsSlotLocked(CurrentBox, slot))
             {
                 SystemSounds.Asterisk.Play();
                 e.Effect = DragDropEffects.Copy;

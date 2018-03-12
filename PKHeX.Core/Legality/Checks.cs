@@ -10,7 +10,12 @@ namespace PKHeX.Core
         private void VerifyGender()
         {
             if (pkm.PersonalInfo.Gender == 255 && pkm.Gender != 2)
-                AddLine(Severity.Invalid, V203, CheckIdentifier.Gender);
+            {
+                // DP/HGSS shedinja glitch -- only generation 4 spawns
+                bool ignore = pkm.Species == 292 && pkm.Format == 4 && pkm.Met_Level != pkm.CurrentLevel;
+                if (!ignore)
+                    AddLine(Severity.Invalid, V203, CheckIdentifier.Gender);
+            }
 
             // Check for PID relationship to Gender & Nature if applicable
             int gen = Info.Generation;
@@ -20,11 +25,21 @@ namespace PKHeX.Core
                 return;
 
             bool genderValid = pkm.IsGenderValid();
-            if (!genderValid && pkm.Format > 5 && (pkm.Species == 183 || pkm.Species == 184))
+            if (!genderValid)
             {
-                var gv = pkm.PID & 0xFF;
-                if (gv > 63 && pkm.Gender == 1) // evolved from azurill after transferring to keep gender
-                    genderValid = true;
+                if (pkm.Format == 4 && pkm.Species == 292) // Shedinja glitch
+                {
+                    // should match original gender
+                    var gender = PKX.GetGenderFromPIDAndRatio(pkm.PID, 0x7F); // 50-50
+                    if (gender == pkm.Gender)
+                        genderValid = true;
+                }
+                else if (pkm.Format > 5 && (pkm.Species == 183 || pkm.Species == 184))
+                {
+                    var gv = pkm.PID & 0xFF;
+                    if (gv > 63 && pkm.Gender == 1) // evolved from azurill after transferring to keep gender
+                        genderValid = true;
+                }
             }
             else if (3 <= Info.Generation && Info.Generation <= 5)
             {
@@ -86,7 +101,7 @@ namespace PKHeX.Core
             if (pkm.PID == 0)
                 AddLine(Severity.Fishy, V207, CheckIdentifier.PID);
 
-            if (Info.Generation >= 6 && pkm.PID == pkm.EncryptionConstant)
+            if ((Info.Generation >= 6 || Info.Generation < 3 && pkm.Format >= 7) && pkm.PID == pkm.EncryptionConstant)
                 AddLine(Severity.Invalid, V208, CheckIdentifier.PID); // better to flag than 1:2^32 odds since RNG is not feasible to yield match
 
             switch (EncounterMatch)
@@ -102,7 +117,7 @@ namespace PKHeX.Core
                         break;
                     if (s.Gift || s.Roaming || s.Ability != 4)
                         break;
-                    if (s.NSparkle)
+                    if (s is EncounterStaticPID p && p.NSparkle)
                         break;
                     VerifyG5PID_IDCorrelation();
                     break;
@@ -280,7 +295,7 @@ namespace PKHeX.Core
 
                 if (!match)
                 {
-                    if ((EncounterMatch as MysteryGift)?.CardID == 2046 && (pkm.SID << 16 | pkm.TID) == 0x79F57B49)
+                    if (EncounterMatch is WC7 wc7 && wc7.CardID == 2046 && (pkm.SID << 16 | pkm.TID) == 0x79F57B49) // ash greninja
                         AddLine(Severity.Valid, V19, CheckIdentifier.Nickname);
                     else
                         AddLine(Severity.Invalid, V20, CheckIdentifier.Nickname);
@@ -333,8 +348,8 @@ namespace PKHeX.Core
         }
         private void VerifyTrade12()
         {
-            var et = (EncounterOriginalGB ?? EncounterMatch) as EncounterTrade;
-            if (et?.TID != 0) // Gen2 Trade
+            var et = (EncounterTrade)(EncounterOriginalGB ?? EncounterMatch);
+            if (et.TID != 0) // Gen2 Trade
                 return; // already checked all relevant properties when fetching with getValidEncounterTradeVC2
 
             if (!EncounterGenerator.IsEncounterTrade1Valid(pkm))
@@ -540,20 +555,17 @@ namespace PKHeX.Core
         }
         private void VerifyIVs()
         {
-            if (EncounterMatch is EncounterStatic s && s.IV3)
+            if (EncounterMatch is EncounterStatic s)
             {
-                int IVCount = 3;
-                if (s.Version == GameVersion.RBY && pkm.Species == 151)
-                    IVCount = 5; // VC Mew
-                if (pkm.IVs.Count(iv => iv == 31) < IVCount)
+                if (s.FlawlessIVCount != 0 && pkm.IVs.Count(iv => iv == 31) < s.FlawlessIVCount)
                 {
-                    AddLine(Severity.Invalid, string.Format(V28, IVCount), CheckIdentifier.IVs);
+                    AddLine(Severity.Invalid, string.Format(V28, s.FlawlessIVCount), CheckIdentifier.IVs);
                     return;
                 }
             }
             if (EncounterMatch is EncounterSlot w)
             {
-                bool force2 = w.Type == SlotType.FriendSafari || pkm.Gen7 && pkm.AbilityNumber == 4;
+                bool force2 = w.Type == SlotType.FriendSafari || w.Generation == 7 && pkm.AbilityNumber == 4;
                 if (force2 && pkm.IVs.Count(iv => iv == 31) < 2)
                 {
                     AddLine(Severity.Invalid, w.Type == SlotType.FriendSafari ? V29 : string.Format(V28, 2), CheckIdentifier.IVs);
@@ -574,15 +586,22 @@ namespace PKHeX.Core
                 if (IVs != null)
                 {
                     var pkIVs = pkm.IVs;
-                    bool valid = true;
-                    for (int i = 0; i < 6; i++)
-                        if (IVs[i] <= 31 && IVs[i] != pkIVs[i])
-                            valid = false;
-                    if (!valid)
-                        AddLine(Severity.Invalid, V30, CheckIdentifier.IVs);
-                    bool IV3 = IVs[0] == 0xFE;
-                    if (IV3 && pkm.IVs.Count(iv => iv == 31) < 3)
-                        AddLine(Severity.Invalid, string.Format(V28, 3), CheckIdentifier.IVs);
+                    var ivflag = IVs.FirstOrDefault(iv => (byte)(iv - 0xFC) < 3);
+                    if (ivflag == 0) // Random IVs
+                    {
+                        bool valid = true;
+                        for (int i = 0; i < 6; i++)
+                            if (IVs[i] <= 31 && IVs[i] != pkIVs[i])
+                                valid = false;
+                        if (!valid)
+                            AddLine(Severity.Invalid, V30, CheckIdentifier.IVs);
+                    }
+                    else
+                    {
+                        int IVCount = ivflag - 0xFB;  // IV2/IV3
+                        if (pkIVs.Count(iv => iv == 31) < IVCount)
+                            AddLine(Severity.Invalid, string.Format(V28, IVCount), CheckIdentifier.IVs);
+                    }
                 }
             }
             if (pkm.IVs.Sum() == 0)
@@ -603,7 +622,7 @@ namespace PKHeX.Core
             if (EncounterMatch is MysteryGift g && !g.IsEgg)
                 return; // Already matches Encounter information
 
-            if (EncounterMatch is EncounterStatic s && s.NSparkle)
+            if (EncounterMatch is EncounterStaticPID s && s.NSparkle)
                 return; // Already checked by VerifyMisc
 
             var ot = pkm.OT_Name;
@@ -627,7 +646,7 @@ namespace PKHeX.Core
                 AddLine(Severity.Fishy, V417, CheckIdentifier.Trainer);
 
             if (pkm.VC)
-                VerifyG1OT();
+                VerifyOTG1();
 
             if (Legal.CheckWordFilter)
             {
@@ -637,7 +656,7 @@ namespace PKHeX.Core
                     AddLine(Severity.Invalid, $"Wordfilter: {bad}", CheckIdentifier.Trainer);
             }
         }
-        private void VerifyG1OT()
+        private void VerifyOTG1()
         {
             string tr = pkm.OT_Name;
 
@@ -651,7 +670,7 @@ namespace PKHeX.Core
                     AddLine(Severity.Invalid, V39, CheckIdentifier.Trainer);
             }
 
-            if (pkm.OT_Gender == 1 && (pkm.Format == 2 && pkm.Met_Location == 0 || pkm.Format > 2 && !Legal.AllowGen2VCCrystal))
+            if (pkm.OT_Gender == 1 && (pkm.Format == 2 && pkm.Met_Location == 0 || pkm.Format > 2 && pkm.VC1))
                 AddLine(Severity.Invalid, V408, CheckIdentifier.Trainer);
         }
         private void VerifyG1OTWithinBounds(string str)
@@ -666,7 +685,7 @@ namespace PKHeX.Core
                 if (str.Length > 5)
                     AddLine(Severity.Invalid, V38, CheckIdentifier.Trainer);
             }
-            else if (pkm is PK2 pk2 && pk2.Korean)
+            else if (pkm.Korean && StringConverter.GetIsG2Korean(str))
             {
                 if (str.Length > 5)
                     AddLine(Severity.Invalid, V38, CheckIdentifier.Trainer);
@@ -687,6 +706,11 @@ namespace PKHeX.Core
             {
                 if (str.Length > 5)
                     AddLine(Severity.Invalid, V1, CheckIdentifier.Trainer);
+            }
+            else if (pkm.Korean && StringConverter.GetIsG2Korean(str))
+            {
+                if (str.Length > 5)
+                    AddLine(Severity.Invalid, V38, CheckIdentifier.Trainer);
             }
             else
             {
@@ -756,15 +780,11 @@ namespace PKHeX.Core
         }
         private void VerifyEncounterType()
         {
-            if (pkm.Format >= 7)
-                return;
-
             if (!Encounter.Valid)
                 return;
 
             EncounterType type = EncounterType.None;
             // Encounter type data is only stored for gen 4 encounters
-            // Gen 6 -> 7 transfer deletes encounter type data
             // All eggs have encounter type none, even if they are from static encounters
             if (pkm.Gen4 && !pkm.WasEgg)
             {
@@ -813,16 +833,16 @@ namespace PKHeX.Core
                 }
             }
         }
-        private static IEnumerable<CheckResult> VerifyVCEncounter(PKM pkm, int baseSpecies, GBEncounterData encounter, EncounterStatic transfer)
+        private static IEnumerable<CheckResult> VerifyVCEncounter(PKM pkm, IEncounterable encounter, ILocation transfer, IList<CheckMoveResult> Moves)
         {
             // Check existing EncounterMatch
             if (encounter == null || transfer == null)
                 yield break; // Avoid duplicate invaild message
 
-            if (encounter.Encounter is EncounterStatic v && (GameVersion.GBCartEraOnly.Contains(v.Version) || v.Version == GameVersion.VCEvents))
+            if (encounter is EncounterStatic v && (GameVersion.GBCartEraOnly.Contains(v.Version) || v.Version == GameVersion.VCEvents))
             {
                 bool exceptions = false;
-                exceptions |= v.Version == GameVersion.VCEvents && baseSpecies == 151 && pkm.TID == 22796;
+                exceptions |= v.Version == GameVersion.VCEvents && encounter.Species == 151 && pkm.TID == 22796;
                 if (!exceptions)
                     yield return new CheckResult(Severity.Invalid, V79, CheckIdentifier.Encounter);
             }
@@ -832,8 +852,32 @@ namespace PKHeX.Core
             if (pkm.Egg_Location != transfer.EggLocation)
                 yield return new CheckResult(Severity.Invalid, V59, CheckIdentifier.Encounter);
 
-            if (baseSpecies == 150 && pkm.Moves.Contains(6)) // pay day
-                yield return new CheckResult(Severity.Invalid, V82, CheckIdentifier.Encounter);
+            // Flag Moves that cannot be transferred
+            if (encounter is EncounterStatic s && s.Version == GameVersion.C && s.EggLocation == 256) // Dizzy Punch Gifts
+            {
+                // can't have Dizzy Punch at all
+                int index = Array.IndexOf(pkm.Moves, 146); // Dizzy Punch
+                if (index >= 0)
+                {
+                    var chk = Moves[index];
+                    if (chk.Generation == 2) // not obtained from a future gen
+                        Moves[index] = new CheckMoveResult(chk.Source, chk.Generation, Severity.Invalid, V82, CheckIdentifier.Move);
+                }
+            }
+
+            bool checkShiny = pkm.VC2 || pkm.TradebackStatus == TradebackType.WasTradeback && pkm.VC1;
+            if (!checkShiny)
+                yield break;
+            if (pkm.Gender == 1) // female
+            {
+                if (pkm.PersonalInfo.Gender == 31 && pkm.IsShiny) // impossible gender-shiny
+                    yield return new CheckResult(Severity.Invalid, V209, CheckIdentifier.PID);
+            }
+            else if (pkm.Species == 201) // unown
+            {
+                if (pkm.AltForm != 8 && pkm.AltForm != 21 && pkm.IsShiny) // impossibly form-shiny (not I or V)
+                    yield return new CheckResult(Severity.Invalid, V209, CheckIdentifier.PID);
+            }
         }
         #endregion
         private void VerifyLevel()
@@ -875,6 +919,22 @@ namespace PKHeX.Core
                 AddLine(Severity.Fishy, V87, CheckIdentifier.Level);
             else
                 AddLine(Severity.Valid, V88, CheckIdentifier.Level);
+        }
+        private void VerifyLevelG1()
+        {
+            if (pkm.IsEgg)
+            {
+                int elvl = Legal.GetEggHatchLevel(pkm);
+                if (elvl != pkm.CurrentLevel)
+                    AddLine(Severity.Invalid, string.Format(V52, elvl), CheckIdentifier.Level);
+                return;
+            }
+            if (pkm.Met_Location != 0) // crystal
+            {
+                int lvl = pkm.CurrentLevel;
+                if (lvl < pkm.Met_Level)
+                    AddLine(Severity.Invalid, V85, CheckIdentifier.Level);
+            }
 
             // There is no way to prevent a gen1 trade evolution as held items (everstone) did not exist.
             // Machoke, Graveler, Haunter and Kadabra captured in the second phase evolution, excluding in-game trades, are already checked
@@ -1237,7 +1297,7 @@ namespace PKHeX.Core
             {
                 if (s.Gift)
                     VerifyBallEquals(s.Ball);
-                else if (pkm.Met_Location == 75 && pkm.Gen5) // DreamWorld
+                else if (s.Location == 75 && s.Generation == 5) // Entree Forest (Dream World)
                     VerifyBallEquals(Legal.DreamWorldBalls);
                 else
                     VerifyBallEquals(Legal.GetWildBalls(pkm));
@@ -1245,12 +1305,12 @@ namespace PKHeX.Core
             }
             if (EncounterMatch is EncounterSlot w)
             {
-                if (pkm.Met_Location == 30016 && pkm.Gen7) // Poké Pelago
+                if (w.Location == 30016 && w.Generation == 7) // Poké Pelago
                     VerifyBallEquals(4); // Pokeball
                 // For gen3/4 Safari Zones and BCC getValidWildEncounters already filter to not return
                 // mixed possible encounters between safari, BCC and other encounters
                 // That means is the first encounter is not safari then there is no safari encounter in the array
-                else if (3 <= Info.Generation && Info.Generation <= 4 && EncounterGenerator.IsSafariSlot(w.Type))
+                else if (3 <= Info.Generation && Info.Generation <= 4 && EncounterSlotGenerator.IsSafariSlot(w.Type))
                     VerifyBallEquals(5); // Safari Ball
                 else if (Info.Generation == 4 && w.Type == SlotType.BugContest)
                     VerifyBallEquals(0x18); // Sport Ball
@@ -1414,7 +1474,7 @@ namespace PKHeX.Core
             {
                 if (!Lineage.Any(e => Legal.Inherit_Apricorn7.Contains(e)))
                     AddLine(Severity.Invalid, V121, CheckIdentifier.Ball);
-                else if (pkm.AbilityNumber == 4 && (Lineage.Contains(029) || Lineage.Contains(032))) // Nido
+                else if (pkm.AbilityNumber == 4 && Legal.Ban_NoHidden7Apricorn.Contains(Lineage[0] | pkm.AltForm << 11)) // Nido & Flabébé blue
                     AddLine(Severity.Invalid, V122, CheckIdentifier.Ball);
                 else
                     AddLine(Severity.Valid, V123, CheckIdentifier.Ball);
@@ -1462,6 +1522,12 @@ namespace PKHeX.Core
 
             if (ball == 26)
             {
+                if (Lineage[0] == 669 && pkm.AltForm == 3 && pkm.AbilityNumber == 4)
+                {
+                    // Can't obtain Flabébé-Blue with Hidden Ability in wild
+                    AddLine(Severity.Invalid, V122, CheckIdentifier.Ball);
+                    return;
+                }
                 if ((pkm.Species > 731 && pkm.Species <= 785) || Lineage.Any(e => Legal.PastGenAlolanNatives.Contains(e) && !Legal.PastGenAlolanNativesUncapturable.Contains(e)))
                 {
                     AddLine(Severity.Valid, V123, CheckIdentifier.Ball);
@@ -1520,7 +1586,7 @@ namespace PKHeX.Core
                 if (pkm.CurrentHandler != 1)
                     return new CheckResult(Severity.Invalid, V134, CheckIdentifier.History);
             }
-            else if (EncounterMatch is WC7 wc7 && wc7.OT_Name.Length > 0)
+            else if (EncounterMatch is WC7 wc7 && wc7.OT_Name.Length > 0 && wc7.TID != 18075) // Ash Pikachu QR Gift doesn't set Current Handler
             {
                 if (pkm.OT_Friendship != PersonalTable.USUM[EncounterMatch.Species].BaseFriendship)
                     return new CheckResult(Severity.Invalid, V132, CheckIdentifier.History);
@@ -1569,7 +1635,7 @@ namespace PKHeX.Core
                 untraded &= gift.IsEgg;
             }
 
-            if (pkm.WasLink && (EncounterMatch as EncounterLink)?.OT == false)
+            if (EncounterMatch is EncounterLink link && link.OT == false)
                 untraded = false;
             else if (Info.Generation < 6)
                 untraded = false;
@@ -1929,20 +1995,31 @@ namespace PKHeX.Core
 
             switch (pkm.Species)
             {
-                case 25: // Pikachu
-                    if (Info.Generation == 6 && pkm.AltForm != 0 ^ Type == typeof(EncounterStatic))
+                case 25 when Info.Generation == 6: // Pikachu Cosplay
+                    if (pkm.AltForm != 0 ^ Type == typeof(EncounterStatic))
                     {
                         string msg = Type == typeof(EncounterStatic) ? V305 : V306;
                         AddLine(Severity.Invalid, msg, CheckIdentifier.Form);
                         return;
                     }
-                    if (Info.Generation == 7 && pkm.AltForm != 0 ^ Type == typeof(MysteryGift))
+                    break;
+                case 25 when Info.Generation == 7: // Pikachu Cap
+                    bool IsValidPikachuCap()
                     {
-                        if (EncounterMatch is WC7 gift && gift.Form != pkm.AltForm)
+                        switch (EncounterMatch)
                         {
-                            AddLine(Severity.Invalid, V307, CheckIdentifier.Form);
-                            return;
+                            default: return pkm.AltForm == 0;
+                            case WC7 wc7: return wc7.Form == pkm.AltForm;
+                            case EncounterStatic s: return s.Form == pkm.AltForm;
                         }
+                    }
+
+                    if (!IsValidPikachuCap())
+                    {
+                        bool gift = EncounterMatch is WC7 g && g.Form != pkm.AltForm;
+                        var msg = gift ? V307 : V317;
+                        AddLine(Severity.Invalid, msg, CheckIdentifier.Form);
+                        return;
                     }
                     break;
                 case 201 when Info.Generation == 2 && pkm.AltForm >= 26:
@@ -2099,15 +2176,6 @@ namespace PKHeX.Core
                     AddLine(Severity.Invalid, V368, CheckIdentifier.Egg);
             }
 
-            if (pkm.Format > 2)
-            {
-                // Female Shinies for a 12.5%-F species are not possible with the 'correct' correlation
-                // Original Transporter code generated a random nature (VC1 only), so we can ignore in this case
-                bool checkShiny = pkm.VC2 || pkm.TradebackStatus == TradebackType.WasTradeback && pkm.VC1;
-                if (checkShiny && pkm.Gender == 1 && pkm.PersonalInfo.Gender == 31 && pkm.IsShiny)
-                    AddLine(Severity.Invalid, V209, CheckIdentifier.PID);
-            }
-
             if (!(pkm is PK1 pk1))
                 return;
 
@@ -2193,6 +2261,11 @@ namespace PKHeX.Core
                     if (pk4.PokéathlonStat != 0)
                         AddLine(Severity.Invalid, V415, CheckIdentifier.Egg);
                 }
+                if (pkm is PK3)
+                {
+                    if (pkm.Language != 1) // All Eggs are Japanese and flagged specially for localized string
+                        AddLine(Severity.Invalid, string.Format(V5, LanguageID.Japanese, (LanguageID)pkm.Language), CheckIdentifier.Egg);
+                }
             }
 
             if (!Encounter.Valid)
@@ -2254,7 +2327,7 @@ namespace PKHeX.Core
             if (g is PGF p && p.IsShiny)
             {
                 Info.PIDIV = MethodFinder.Analyze(pkm);
-                if (Info.PIDIV.Type != PIDType.G5MGShiny)
+                if (Info.PIDIV.Type != PIDType.G5MGShiny && pkm.Egg_Location != 30003)
                     AddLine(Severity.Invalid, V411, CheckIdentifier.PID);
             }
 
@@ -2287,7 +2360,7 @@ namespace PKHeX.Core
         }
         private void VerifyNsPKM()
         {
-            bool req = EncounterMatch is EncounterStatic s && s.NSparkle;
+            bool req = EncounterMatch is EncounterStaticPID s && s.NSparkle;
             if (pkm.Format == 5)
             {
                 bool has = ((PK5)pkm).NPokémon;

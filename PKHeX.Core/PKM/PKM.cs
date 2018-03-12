@@ -321,8 +321,9 @@ namespace PKHeX.Core
                 if (VC1) return 1;
                 if (VC2) return 2;
                 return -1;
-            } 
+            }
         }
+        public int DebutGeneration => Legal.GetDebutGeneration(Species);
         public bool PKRS_Infected => PKRS_Strain > 0;
         public bool PKRS_Cured => PKRS_Days == 0 && PKRS_Strain > 0;
         public virtual bool ChecksumValid => Checksum == CalculateChecksum();
@@ -333,6 +334,8 @@ namespace PKHeX.Core
         public int MarkHeart       { get => Markings[3]; set { var marks = Markings; marks[3] = value; Markings = marks; } }
         public int MarkStar        { get => Markings[4]; set { var marks = Markings; marks[4] = value; Markings = marks; } }
         public int MarkDiamond     { get => Markings[5]; set { var marks = Markings; marks[5] = value; Markings = marks; } }
+        public int IVTotal => IVs.Sum();
+        public int EVTotal => EVs.Sum();
         /// <summary>
         /// Swaps bits at a given position
         /// </summary>
@@ -395,6 +398,16 @@ namespace PKHeX.Core
                 if (value.Length > 1) RelearnMove2 = value[1];
                 if (value.Length > 2) RelearnMove3 = value[2];
                 if (value.Length > 3) RelearnMove4 = value[3];
+            }
+        }
+        public int[] Contest
+        {
+            get => new[] { CNT_Cool, CNT_Beauty, CNT_Cute, CNT_Smart, CNT_Tough, CNT_Sheen };
+            set
+            {
+                if (value?.Length != 6) return;
+                CNT_Cool = value[0]; CNT_Beauty = value[1]; CNT_Cute = value[2];
+                CNT_Smart = value[3]; CNT_Tough = value[4]; CNT_Sheen = value[5];
             }
         }
         public int PIDAbility
@@ -514,7 +527,7 @@ namespace PKHeX.Core
             }
         }
         public virtual bool WasIngameTrade => Met_Location == 30001 || Gen4 && Egg_Location == 2001;
-        public virtual bool IsUntraded => Format >= 6 && string.IsNullOrWhiteSpace(HT_Name) && GenNumber == Format;
+        public virtual bool IsUntraded => false;
         public virtual bool IsNative => GenNumber == Format;
         public virtual bool IsOriginValid => Species <= Legal.GetMaxSpeciesOrigin(Format);
 
@@ -534,17 +547,19 @@ namespace PKHeX.Core
         /// Toggles the Hyper Training flag for a given stat.
         /// </summary>
         /// <param name="stat">Battle Stat (H/A/B/S/C/D)</param>
-        public void HyperTrainInvert(int stat)
+        /// <returns>Final Hyper Training Flag value</returns>
+        public bool HyperTrainInvert(int stat)
         {
             switch (stat)
             {
-                case 0: HT_HP ^= true; break;
-                case 1: HT_ATK ^= true; break;
-                case 2: HT_DEF ^= true; break;
-                case 3: HT_SPA ^= true; break;
-                case 4: HT_SPD ^= true; break;
-                case 5: HT_SPE ^= true; break;
+                case 0: return HT_HP ^= true;
+                case 1: return HT_ATK ^= true;
+                case 2: return HT_DEF ^= true;
+                case 3: return HT_SPE ^= true;
+                case 4: return HT_SPA ^= true;
+                case 5: return HT_SPD ^= true;
             }
+            return false;
         }
 
         /// <summary>
@@ -715,9 +730,8 @@ namespace PKHeX.Core
             Stats[3] = (ushort)(((HT_SPE ? 31 : IV_SPE) + 2 * p.SPE + EV_SPE / 4) * level / 100 + 5);
 
             // Account for nature
-            int incr = Nature / 5 + 1;
-            int decr = Nature % 5 + 1;
-            if (incr == decr || incr >= Stats.Length) return Stats;
+            if (PKX.GetNatureModification(Nature, out int incr, out int decr))
+                return Stats;
             Stats[incr] *= 11; Stats[incr] /= 10;
             Stats[decr] *= 9; Stats[decr] /= 10;
             return Stats;
@@ -817,7 +831,7 @@ namespace PKHeX.Core
                 SetShinyIVs();
 
             do PID = PKX.GetRandomPID(Species, Gender, Version, Nature, AltForm, PID); while (!IsShiny);
-            if (GenNumber < 6)
+            if (Format >= 6 && 3 <= GenNumber && GenNumber <= 5)
                 EncryptionConstant = PID;
         }
         /// <summary>
@@ -838,7 +852,7 @@ namespace PKHeX.Core
         public void SetPIDGender(int gender)
         {
             do PID = PKX.GetRandomPID(Species, gender, Version, Nature, AltForm, PID); while (IsShiny);
-            if (GenNumber < 6)
+            if (Format >= 6 && 3 <= GenNumber && GenNumber <= 5)
                 EncryptionConstant = PID;
         }
         /// <summary>
@@ -850,7 +864,7 @@ namespace PKHeX.Core
         public void SetPIDNature(int nature)
         {
             do PID = PKX.GetRandomPID(Species, Gender, Version, nature, AltForm, PID); while (IsShiny);
-            if (GenNumber < 6)
+            if (Format >= 6 && 3 <= GenNumber && GenNumber <= 5)
                 EncryptionConstant = PID;
         }
         /// <summary>
@@ -863,6 +877,8 @@ namespace PKHeX.Core
         public void SetPIDUnown3(int form)
         {
             do PID = Util.Rand32(); while (PKX.GetUnownForm(PID) != form);
+            if (Format >= 6 && 3 <= GenNumber && GenNumber <= 5)
+                EncryptionConstant = PID;
         }
 
         /// <summary>
@@ -901,72 +917,21 @@ namespace PKHeX.Core
         }
 
         /// <summary>
-        /// Converts a <see cref="XK3"/> or <see cref="PK3"/> to <see cref="CK3"/>.
+        /// Applies all shared properties from the current <see cref="PKM"/> to <see cref="Destination"/> <see cref="PKM"/>.
         /// </summary>
-        /// <returns><see cref="CK3"/> format <see cref="PKM"/></returns>
-        public PKM ConvertToCK3()
-        {
-            if (Format != 3)
-                return null;
-            if (GetType() == typeof(CK3))
-                return this;
-            var pk = new CK3();
-            TransferPropertiesWithReflection(this is XK3 ? ConvertToPK3() : this, pk);
-            pk.SetStats(GetStats(PersonalTable.RS[pk.Species]));
-            pk.Stat_Level = pk.CurrentLevel;
-            return pk;
-        }
-        /// <summary>
-        /// Converts a <see cref="PK3"/> or <see cref="CK3"/> to <see cref="XK3"/>.
-        /// </summary>
-        /// <returns><see cref="XK3"/> format <see cref="PKM"/></returns>
-        public PKM ConvertToXK3()
-        {
-            if (Format != 3)
-                return null;
-            if (GetType() == typeof(XK3))
-                return this;
-            var pk = new XK3();
-            TransferPropertiesWithReflection(this is CK3 ? ConvertToPK3() : this, pk);
-            pk.SetStats(GetStats(PersonalTable.RS[pk.Species]));
-            pk.Stat_Level = pk.CurrentLevel;
-            return pk;
-        }
-        /// <summary>
-        /// Converts a <see cref="CK3"/> or <see cref="XK3"/> to <see cref="PK3"/>.
-        /// </summary>
-        /// <returns><see cref="PK3"/> format <see cref="PKM"/></returns>
-        public PKM ConvertToPK3()
-        {
-            if (Format != 3)
-                return null;
-            if (GetType() == typeof(PK3))
-                return this;
-            var pk = new PK3();
-            TransferPropertiesWithReflection(this, pk);
-
-            // Transferring XK3 to PK3 when it originates from XD sets the fateful encounter (obedience) flag.
-            if (this is XK3 xk3 && xk3.Version == 15 && xk3.IsOriginXD())
-                pk.FatefulEncounter = true;
-
-            pk.RefreshChecksum();
-            return pk;
-        }
-
-        /// <summary>
-        /// Applies all shared properties from <see cref="Source"/> to <see cref="Destination"/>.
-        /// </summary>
-        /// <param name="Source"><see cref="PKM"/> that supplies property values.</param>
         /// <param name="Destination"><see cref="PKM"/> that receives property values.</param>
-        public void TransferPropertiesWithReflection(PKM Source, PKM Destination)
+        public void TransferPropertiesWithReflection(PKM Destination)
         {
             // Only transfer declared properties not defined in PKM.cs but in the actual type
-            var SourceProperties = ReflectUtil.GetPropertiesCanWritePublicDeclared(Source.GetType());
+            var SourceProperties = ReflectUtil.GetPropertiesCanWritePublicDeclared(GetType());
             var DestinationProperties = ReflectUtil.GetPropertiesCanWritePublicDeclared(Destination.GetType());
-            foreach (string property in SourceProperties.Intersect(DestinationProperties))
+
+            // Transfer properties in the order they are defined in the destination PKM format for best conversion
+            var shared = DestinationProperties.Intersect(SourceProperties);
+            foreach (string property in shared)
             {
                 var prop = ReflectUtil.GetValue(this, property);
-                if (prop != null)
+                if (prop != null && !(prop is byte[]))
                     ReflectUtil.SetValue(Destination, property, prop);
             }
         }

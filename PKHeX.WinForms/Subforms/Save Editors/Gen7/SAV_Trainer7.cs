@@ -113,7 +113,7 @@ namespace PKHeX.WinForms
             L_Vivillon.Text = GameInfo.Strings.specieslist[666] + ":";
             CB_Vivillon.DisplayMember = "Text";
             CB_Vivillon.ValueMember = "Value";
-            CB_Vivillon.DataSource = PKX.GetFormList(666, GameInfo.Strings.types, GameInfo.Strings.forms, Main.GenderSymbols).ToList();
+            CB_Vivillon.DataSource = PKX.GetFormList(666, GameInfo.Strings.types, GameInfo.Strings.forms, Main.GenderSymbols, SAV.Generation).ToList();
 
             var styles = new List<string>(BattleStyles);
             if (SAV.USUM)
@@ -473,7 +473,10 @@ namespace PKHeX.WinForms
             SAV.SetSurfScore(1, (int)NUD_Surf1.Value);
             SAV.SetSurfScore(2, (int)NUD_Surf2.Value);
             SAV.SetSurfScore(3, (int)NUD_Surf3.Value);
-            if (TB_RotomOT.Text != TB_OTName.Text && DialogResult.Yes == 
+
+            if (TB_RotomOT.Text != TB_OTName.Text // different Rotom name from OT
+                && TB_OTName.Text != SAV.OT // manually changed
+                && DialogResult.Yes == // wants to update
                 WinFormsUtil.Prompt(MessageBoxButtons.YesNo, "Rotom OT does not match OT name. Update Rotom OT name with OT name?"))
                 SAV.RotomOT = TB_OTName.Text;
             else

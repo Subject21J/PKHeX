@@ -179,7 +179,7 @@ namespace PKHeX.WinForms
                 int offset = SAV.GetBoxOffset(box) + slot*SAV.SIZE_STORED;
                 PKM pkSAV = SAV.GetStoredSlot(offset);
 
-                if (!pkSAV.Data.SequenceEqual(pk.Data)) // data still exists in SAV, unmodified
+                if (!pkSAV.DecryptedBoxData.SequenceEqual(pk.DecryptedBoxData)) // data still exists in SAV, unmodified
                 {
                     WinFormsUtil.Error("Database slot data does not match save data!", "Don't move Pokémon after initializing the Database, please re-open the Database viewer.");
                     return;
@@ -363,6 +363,14 @@ namespace PKHeX.WinForms
                 .Concat(SAV.BoxData.Where(pk => pk.Species != 0)) // Fetch from save file
                 .Where(pk => pk.ChecksumValid && pk.Species != 0 && pk.Sanity == 0)
                 .Distinct());
+
+            // Load stats for pkm who do not have any
+            foreach (var pk in RawDB.Where(z => z.Stat_Level == 0))
+            {
+                pk.Stat_Level = pk.CurrentLevel;
+                pk.SetStats(pk.GetStats(pk.PersonalInfo));
+            }
+
             try
             {
                 BeginInvoke(new MethodInvoker(() => SetResults(RawDB)));
@@ -393,6 +401,19 @@ namespace PKHeX.WinForms
 
             foreach (PKM pkm in Results)
                 File.WriteAllBytes(Path.Combine(path, Util.CleanFileName(pkm.FileName)), pkm.DecryptedBoxData);
+        }
+        private void Menu_Import_Click(object sender, EventArgs e)
+        {
+            if (!BoxView.GetBulkImportSettings(out var clearAll, out var noSetb))
+                return;
+
+            int box = BoxView.Box.CurrentBox;
+            if (!SAV.LoadBoxes(Results, out var result, box, clearAll, noSetb))
+                return;
+
+            BoxView.SetPKMBoxes();
+            BoxView.UpdateBoxViewers();
+            WinFormsUtil.Alert(result);
         }
 
         // View Updates
@@ -426,8 +447,6 @@ namespace PKHeX.WinForms
                     res = res.Where(pk => pk.Format <= 2);
                 if (format >= 3 && format <= 6) // 3-6
                     res = res.Where(pk => pk.Format >= 3);
-                if (format >= 7) // 1,3-6,7
-                    res = res.Where(pk => pk.Format != 2);
             }
 
             switch (CB_Generation.SelectedIndex)
@@ -466,8 +485,8 @@ namespace PKHeX.WinForms
             if (CHK_Shiny.CheckState == CheckState.Unchecked) res = res.Where(pk => !pk.IsShiny);
             if (CHK_IsEgg.CheckState == CheckState.Checked) res = res.Where(pk => pk.IsEgg);
             if (CHK_IsEgg.CheckState == CheckState.Unchecked) res = res.Where(pk => !pk.IsEgg);
-            if (CHK_IsEgg.CheckState == CheckState.Checked && string.IsNullOrWhiteSpace(MT_ESV.Text))
-                res = res.Where(pk => pk.PSV == Convert.ToInt16(MT_ESV.Text));
+            if (CHK_IsEgg.CheckState == CheckState.Checked && int.TryParse(MT_ESV.Text, out int esv))
+                res = res.Where(pk => pk.PSV == esv);
 
             // Tertiary Searchables
             res = FilterByLVL(res, CB_Level.SelectedIndex, TB_Level.Text);
@@ -526,11 +545,11 @@ namespace PKHeX.WinForms
             switch (option)
             {
                 case 0: break; // Any (Do nothing)
-                case 1: // <=
+                case 3: // <=
                     return res.Where(pk => pk.Stat_Level <= level);
                 case 2: // == 
                     return res.Where(pk => pk.Stat_Level == level);
-                case 3: // >=
+                case 1: // >=
                     return res.Where(pk => pk.Stat_Level >= level);
             }
             return res;

@@ -25,8 +25,8 @@ namespace PKHeX.Core
         public byte[] Footer { protected get; set; } = new byte[0]; // .dsv
         public byte[] Header { protected get; set; } = new byte[0]; // .gci
         public bool Japanese { get; protected set; }
-        protected string PlayTimeString => $"{PlayedHours}ː{PlayedMinutes:00}ː{PlayedSeconds:00}"; // not :
-        public virtual bool IndeterminateGame => false;
+        protected virtual string PlayTimeString => $"{PlayedHours}ː{PlayedMinutes:00}ː{PlayedSeconds:00}"; // not :
+        public bool IndeterminateGame => Version == GameVersion.Unknown;
         public virtual bool IndeterminateSubVersion => false;
         public abstract string Extension { get; }
         public virtual string[] PKMExtensions => PKM.Extensions.Where(f => 
@@ -110,6 +110,7 @@ namespace PKHeX.Core
         public bool HasDaycare => Daycare > -1;
         public virtual bool HasPokeDex => PokeDex > -1;
         public virtual bool HasBoxWallpapers => GetBoxWallpaperOffset(0) > -1;
+        public virtual bool HasNamableBoxes => HasBoxWallpapers;
         public virtual bool HasSUBE => SUBE > -1 && !ORAS;
         public virtual bool HasGeolocation => false;
         public bool HasPokeBlock => ORAS && !ORASDEMO;
@@ -129,7 +130,7 @@ namespace PKHeX.Core
         public virtual int MaxShadowID => 0;
 
         // Offsets
-        protected virtual int Box { get; set; } = int.MinValue;
+        protected int Box { get; set; } = int.MinValue;
         protected int Party { get; set; } = int.MinValue;
         protected int Trainer1 { get; set; } = int.MinValue;
         protected int Daycare { get; set; } = int.MinValue;
@@ -169,8 +170,6 @@ namespace PKHeX.Core
             }
             set
             {
-                if (value == null)
-                    throw new ArgumentNullException();
                 if (value.Count != BoxCount*BoxSlotCount)
                     throw new ArgumentException($"Expected {BoxCount*BoxSlotCount}, got {value.Count}");
                 if (value.Any(pk => PKMType != pk.GetType()))
@@ -191,8 +190,6 @@ namespace PKHeX.Core
             }
             set
             {
-                if (value == null)
-                    throw new ArgumentNullException();
                 if (value.Count == 0 || value.Count > 6)
                     throw new ArgumentException($"Expected 1-6, got {value.Count}");
                 if (value.Any(pk => PKMType != pk.GetType()))
@@ -499,7 +496,7 @@ namespace PKHeX.Core
             return true;
         }
 
-        protected virtual int GetBoxWallpaperOffset(int box) { return -1; }
+        protected virtual int GetBoxWallpaperOffset(int box) => -1;
         public virtual int GetBoxWallpaper(int box)
         {
             int offset = GetBoxWallpaperOffset(box);
@@ -666,9 +663,6 @@ namespace PKHeX.Core
 
         public byte[] GetData(int Offset, int Length)
         {
-            if (Offset + Length > Data.Length)
-                return null;
-
             byte[] data = new byte[Length];
             Buffer.BlockCopy(Data, Offset, data, 0, Length);
             return data;
@@ -677,6 +671,13 @@ namespace PKHeX.Core
         {
             input.CopyTo(Data, Offset);
             Edited = true;
+        }
+        public bool IsRangeEmpty(int Offset, int Length)
+        {
+            for (int i = Offset; i < Offset + Length; i++)
+                if (Data[i] != 0)
+                    return false;
+            return true;
         }
 
         public abstract string GetString(int Offset, int Length);

@@ -14,7 +14,7 @@ namespace PKHeX.Core
         public override string Extension => ".sav";
         public SAV4(byte[] data = null, GameVersion versionOverride = GameVersion.Any)
         {
-            Data = data == null ? new byte[SaveUtil.SIZE_G4RAW] : (byte[])data.Clone();
+            Data = data ?? new byte[SaveUtil.SIZE_G4RAW];
             BAK = (byte[])Data.Clone();
             Exportable = !Data.All(z => z == 0);
 
@@ -43,7 +43,7 @@ namespace PKHeX.Core
         }
 
         // Configuration
-        public override SaveFile Clone() { return new SAV4(Data, Version); }
+        public override SaveFile Clone() { return new SAV4((byte[])Data.Clone(), Version); }
 
         public override int SIZE_STORED => PKX.SIZE_4STORED;
         protected override int SIZE_PARTY => PKX.SIZE_4PARTY;
@@ -65,7 +65,7 @@ namespace PKHeX.Core
         public override int MaxItemID => Version == GameVersion.HGSS ? Legal.MaxItemID_4_HGSS : Version == GameVersion.Pt ? Legal.MaxItemID_4_Pt : Legal.MaxItemID_4_DP;
         public override int MaxAbilityID => Legal.MaxAbilityID_4;
         public override int MaxBallID => Legal.MaxBallID_4;
-        public override int MaxGameID => 15; // Colo/XD
+        public override int MaxGameID => Legal.MaxGameID_4; // Colo/XD
 
         // Checksums
         private static int[][] GetChecksumOffsets(GameVersion g)
@@ -142,9 +142,9 @@ namespace PKHeX.Core
 
             // Check to see if the save is initialized completely
             // if the block is not initialized, fall back to the other save.
-            if (GetData(0x00000, 10).SequenceEqual(Enumerable.Repeat((byte)0xFF, 10)))
+            if (GetData(0x00000, 10).All(z => z == 0xFF))
             { generalBlock = 1; return; }
-            if (GetData(0x40000, 10).SequenceEqual(Enumerable.Repeat((byte)0xFF, 10)))
+            if (GetData(0x40000, 10).All(z => z == 0xFF))
             { generalBlock = 0; return; }
 
             // Check SaveCount for current save
@@ -166,9 +166,9 @@ namespace PKHeX.Core
 
             // Check to see if the save is initialized completely
             // if the block is not initialized, fall back to the other save.
-            if (GetData(ofs + 0x00000, 10).SequenceEqual(Enumerable.Repeat((byte)0xFF, 10)))
+            if (GetData(ofs + 0x00000, 10).All(z => z == 0xFF))
             { storageBlock = 1; return; }
-            if (GetData(ofs + 0x40000, 10).SequenceEqual(Enumerable.Repeat((byte)0xFF, 10)))
+            if (GetData(ofs + 0x40000, 10).All(z => z == 0xFF))
             { storageBlock = 0; return; }
 
             storageBlock = BitConverter.ToUInt16(Data, ofs) >= BitConverter.ToUInt16(Data, ofs + 0x40000) ? 0 : 1;
@@ -308,13 +308,13 @@ namespace PKHeX.Core
                     new InventoryPouch(InventoryType.MailItems, LegalMailItems, 999, OFS_MailItems),
                 };
                 foreach (var p in pouch)
-                    p.GetPouch(ref Data);
+                    p.GetPouch(Data);
                 return pouch;
             }
             set
             {
                 foreach (var p in value)
-                    p.SetPouch(ref Data);
+                    p.SetPouch(Data);
             }
         }
 
@@ -353,6 +353,11 @@ namespace PKHeX.Core
         {
             get => BitConverter.ToUInt32(Data, Trainer1 + 0x14);
             set => BitConverter.GetBytes(value).CopyTo(Data, Trainer1 + 0x14);
+        }
+        public uint Coin
+        {
+            get => BitConverter.ToUInt16(Data, Trainer1 + 0x20);
+            set => BitConverter.GetBytes((ushort)value).CopyTo(Data, Trainer1 + 0x20);
         }
         public override int Gender
         {
@@ -610,10 +615,10 @@ namespace PKHeX.Core
             if (value == null)
                 return false;
             for (int i = 0; i < 8; i++) // 8 PGT
-                if ((value[i] as PGT)?.CardType != 0)
+                if (value[i] is PGT g && g.CardType != 0)
                     return true;
             for (int i = 8; i < 11; i++) // 3 PCD
-                if ((value[i] as PCD)?.Gift.CardType != 0)
+                if (value[i] is PCD d && d.Gift.CardType != 0)
                     return true;
             return false;
         }
@@ -626,8 +631,7 @@ namespace PKHeX.Core
             int[] cardMatch = new int[8];
             for (int i = 0; i < 8; i++)
             {
-                var pgt = value[i] as PGT;
-                if (pgt == null)
+                if (!(value[i] is PGT pgt))
                     continue;
 
                 if (pgt.CardType == 0) // empty
@@ -639,8 +643,7 @@ namespace PKHeX.Core
                 cardMatch[i] = pgt.Slot = 3;
                 for (byte j = 0; j < 3; j++)
                 {
-                    var pcd = value[8 + j] as PCD;
-                    if (pcd == null)
+                    if (!(value[8 + j] is PCD pcd))
                         continue;
 
                     // Check if data matches (except Slot @ 0x02)
@@ -670,6 +673,19 @@ namespace PKHeX.Core
                 bool available = IsMysteryGiftAvailable(value.Gifts);
                 MysteryGiftActive |= available;
                 value.Flags[2047] = available;
+
+                // Check encryption for each gift (decrypted wc4 sneaking in)
+                foreach (var g in value.Gifts)
+                {
+                    if (g is PGT pgt)
+                        pgt.VerifyPKEncryption();
+                    else if (g is PCD pcd)
+                    {
+                        var dg = pcd.Gift;
+                        if (dg.VerifyPKEncryption())
+                            pcd.Gift = dg; // set encrypted gift back to PCD.
+                    }
+                }
 
                 MysteryGiftReceivedFlags = value.Flags;
                 MysteryGiftCards = value.Gifts;
@@ -776,7 +792,7 @@ namespace PKHeX.Core
                 return;
             if (pkm.Species > MaxSpeciesID)
                 return;
-            if (Version == GameVersion.Unknown)
+            if (Version == GameVersion.Invalid)
                 return;
             if (PokeDex < 0)
                 return;
@@ -849,6 +865,12 @@ namespace PKHeX.Core
                         Data[FormOffset1 + 4 + i] = (byte)pkm.AltForm;
                         break; // form now set
                     }
+                }
+                else if (pkm.Species == 172 && HGSS) // Pichu (HGSS Only)
+                {
+                    int form = pkm.AltForm == 1 ? 2 : pkm.Gender;
+                    CheckInsertForm(ref forms, form);
+                    SetForms(pkm.Species, forms);
                 }
                 else
                 {
@@ -1144,7 +1166,7 @@ namespace PKHeX.Core
 
         // Pokewalker
         private int OFS_WALKER = int.MinValue;
-        public void PokewalkerCoursesUnlockAll() => SetData(BitConverter.GetBytes((uint)0x7FFFFFFF), OFS_WALKER);
+        public void PokewalkerCoursesUnlockAll() => SetData(BitConverter.GetBytes((uint)0x07FF_FFFF), OFS_WALKER);
         public bool[] PokewalkerCoursesUnlocked
         {
             get
@@ -1173,6 +1195,10 @@ namespace PKHeX.Core
         public int UG_TrapsAvoided { get => BitConverter.ToInt32(Data, OFS_UG_Stats + 0x18); set => SetData(BitConverter.GetBytes(value), OFS_UG_Stats + 0x18); }
         public int UG_TrapsTriggered { get => BitConverter.ToInt32(Data, OFS_UG_Stats + 0x1C); set => SetData(BitConverter.GetBytes(value), OFS_UG_Stats + 0x1C); }
         public int UG_Flags { get => BitConverter.ToInt32(Data, OFS_UG_Stats + 0x34); set => SetData(BitConverter.GetBytes(value), OFS_UG_Stats + 0x34); }
+
+        // Apricorn Pouch
+        public int GetApricornCount(int i) => !HGSS ? -1 : Data[0xE558 + GBO + i];
+        public void SetApricornCount(int i, int count) => Data[0xE558 + GBO + i] = (byte)count;
 
         public override string GetString(int Offset, int Count) => StringConverter.GetString4(Data, Offset, Count);
         public override byte[] SetString(string value, int maxLength, int PadToSize = 0, ushort PadWith = 0)

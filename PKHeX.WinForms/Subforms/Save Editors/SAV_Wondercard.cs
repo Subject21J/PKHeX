@@ -308,7 +308,7 @@ namespace PKHeX.WinForms
         }
         private void ExportQRFromView()
         {
-            if (mg.Data.SequenceEqual(new byte[mg.Data.Length]))
+            if (mg.Data.All(z => z == 0))
             {
                 WinFormsUtil.Alert("No wondercard data found in loaded slot!");
                 return;
@@ -324,9 +324,9 @@ namespace PKHeX.WinForms
             if (qr == null)
                 return;
 
-            string desc = $"({mg.Type}) {GetDescription(mg)}";
+            string desc = $"({mg.Type}) {string.Join(Environment.NewLine, GetDescription(mg))}";
 
-            new QR(qr, PB_Preview.Image, null, desc + "PKHeX Wonder Card @ ProjectPokemon.org").ShowDialog();
+            new QR(qr, PB_Preview.Image, null, desc + Environment.NewLine + "PKHeX Wonder Card @ ProjectPokemon.org").ShowDialog();
         }
         private void ImportQRToView(string url)
         {

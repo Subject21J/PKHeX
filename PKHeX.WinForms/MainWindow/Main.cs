@@ -22,7 +22,7 @@ namespace PKHeX.WinForms
         public Main()
         {
             new Task(() => new SplashScreen().ShowDialog()).Start();
-            new Task(RefreshMGDB).Start();
+            new Task(() => Legal.RefreshMGDB(MGDatabasePath)).Start();
             InitializeComponent();
 
             FormLoadCheckForUpdates();
@@ -39,7 +39,10 @@ namespace PKHeX.WinForms
             Show();
             WindowState = FormWindowState.Normal;
             if (HaX)
+            {
+                PKMConverter.AllowIncompatibleConversion = true;
                 WinFormsUtil.Alert("Illegal mode activated.", "Please behave.");
+            }
             else if (showChangelog)
                 new About().ShowDialog();
 
@@ -100,8 +103,10 @@ namespace PKHeX.WinForms
             BAKprompt = false;
 
             CB_MainLanguage.Items.AddRange(main_langlist);
-            C_SAV.HaX = PKME_Tabs.HaX = HaX = args.Any(x => string.Equals(x.Trim('-'), nameof(HaX), StringComparison.CurrentCultureIgnoreCase))
+            HaX = args.Any(x => string.Equals(x.Trim('-'), nameof(HaX), StringComparison.CurrentCultureIgnoreCase))
                 || Path.GetFileNameWithoutExtension(Process.GetCurrentProcess().MainModule.FileName).EndsWith(nameof(HaX));
+
+            PKMConverter.AllowIncompatibleConversion = C_SAV.HaX = PKME_Tabs.HaX = HaX;
             PB_Legal.Visible = !HaX;
 
             int languageID = 1; // English
@@ -249,7 +254,8 @@ namespace PKHeX.WinForms
             SaveFile.SetUpdateDex = Menu_ModifyDex.Checked = Settings.SetUpdateDex;
             SaveFile.SetUpdatePKM = C_SAV.ModifyPKM = PKME_Tabs.ModifyPKM = Menu_ModifyPKM.Checked = Settings.SetUpdatePKM;
             C_SAV.FlagIllegal = Menu_FlagIllegal.Checked = Settings.FlagIllegal;
-            Menu_ModifyUnset.Checked = Settings.ModifyUnset;
+            PKX.AllowShinySprite = Menu_ModifyUnset.Checked = Settings.ShinySprites;
+            Menu_ShinySprites.Checked = Settings.ShinySprites;
 
             // Select Language
             string l = Settings.Language;
@@ -353,7 +359,13 @@ namespace PKHeX.WinForms
         private void MainMenuModifyDex(object sender, EventArgs e) => Settings.Default.SetUpdateDex = SaveFile.SetUpdateDex = Menu_ModifyDex.Checked;
         private void MainMenuModifyUnset(object sender, EventArgs e) => Settings.Default.ModifyUnset = Menu_ModifyUnset.Checked;
         private void MainMenuModifyPKM(object sender, EventArgs e) => Settings.Default.SetUpdatePKM = SaveFile.SetUpdatePKM = Menu_ModifyPKM.Checked;
-        private void MainMenuFlagIllegal(object sender, EventArgs e) => C_SAV.FlagIllegal = Settings.Default.FlagIllegal = Menu_FlagIllegal.Checked;
+        private void MainMenuFlagIllegal(object sender, EventArgs e) => Settings.Default.FlagIllegal = C_SAV.FlagIllegal = Menu_FlagIllegal.Checked;
+        private void MainMenuShinySprites(object sender, EventArgs e)
+        {
+            Settings.Default.ShinySprites = PKX.AllowShinySprite = Menu_ShinySprites.Checked;
+            C_SAV.ReloadSlots();
+            PKME_Tabs_UpdatePreviewSprite(sender, e);
+        }
 
         private void MainMenuBoxLoad(object sender, EventArgs e)
         {
@@ -475,7 +487,7 @@ namespace PKHeX.WinForms
             FileInfo fi = new FileInfo(path);
             if (!fi.Exists)
                 return;
-            if (fi.Length > 0x10009C && fi.Length != 0x380000 && ! SAV3GCMemoryCard.IsMemoryCardSize(fi.Length))
+            if (fi.Length > 0x10009C && fi.Length != SaveUtil.SIZE_G4BR && ! SAV3GCMemoryCard.IsMemoryCardSize(fi.Length)) // pbr/GC have size > 1MB
                 WinFormsUtil.Error("Input file is too large." + Environment.NewLine + $"Size: {fi.Length} bytes", path);
             else if (fi.Length < 32)
                 WinFormsUtil.Error("Input file is too small." + Environment.NewLine + $"Size: {fi.Length} bytes", path);
@@ -485,14 +497,14 @@ namespace PKHeX.WinForms
                 catch (Exception e) { WinFormsUtil.Error("Unable to load file.  It could be in use by another program.\nPath: " + path, e); return; }
 
                 #if DEBUG
-                OpenFile(input, path, ext, C_SAV.SAV);
+                OpenFile(input, path, ext);
                 #else
-                try { OpenFile(input, path, ext, C_SAV.SAV); }
+                try { OpenFile(input, path, ext); }
                 catch (Exception e) { WinFormsUtil.Error("Unable to load file.\nPath: " + path, e); }
                 #endif
             }
         }
-        private void OpenFile(byte[] input, string path, string ext, SaveFile currentSaveFile)
+        private void OpenFile(byte[] input, string path, string ext)
         {
             if (TryLoadXorpadSAV(input, path))
                 return;
@@ -500,7 +512,7 @@ namespace PKHeX.WinForms
                 return;
             if (TryLoadMemoryCard(input, path))
                 return;
-            if (TryLoadPKM(input, path, ext, currentSaveFile))
+            if (TryLoadPKM(input, ext))
                 return;
             if (TryLoadPCBoxBin(input))
                 return;
@@ -550,8 +562,7 @@ namespace PKHeX.WinForms
                 return true;
             }
 
-            OpenSAV(SaveUtil.GetVariantSAV(psdata), path);
-            return true;
+            return TryLoadSAV(psdata, path);
         }
         private bool TryLoadSAV(byte[] input, string path)
         {
@@ -574,7 +585,7 @@ namespace PKHeX.WinForms
             OpenSAV(sav, path);
             return true;
         }
-        private bool TryLoadPKM(byte[] input, string path, string ext, SaveFile SAV)
+        private bool TryLoadPKM(byte[] input, string ext)
         {
             var pk = PKMConverter.GetPKMfromBytes(input, prefer: ext.Length > 0 ? (ext.Last() - '0') & 0xF : C_SAV.SAV.Generation);
             if (pk == null)
@@ -663,7 +674,7 @@ namespace PKHeX.WinForms
             if (MC.HasRSBOX) games.Add(new ComboItem { Text = "RS Box", Value = (int)GameVersion.RSBOX });
 
             WinFormsUtil.Alert("Multiple games detected", "Select a game to edit.");
-            var dialog = new SAV_GameSelect(games.ToArray());
+            var dialog = new SAV_GameSelect(games);
             dialog.ShowDialog();
             return dialog.Result;
         }
@@ -711,7 +722,8 @@ namespace PKHeX.WinForms
                 return null;
 
             var blank = sav.BlankPKM;
-            string path = Path.Combine(TemplatePath, $"{new DirectoryInfo(TemplatePath).Name}.{blank.Extension}");
+            var di = new DirectoryInfo(TemplatePath);
+            string path = Path.Combine(TemplatePath, $"{di.Name}.{blank.Extension}");
 
             if (!File.Exists(path) || !PKX.IsPKM(new FileInfo(path).Length))
                 return null;
@@ -719,17 +731,14 @@ namespace PKHeX.WinForms
             var pk = PKMConverter.GetPKMfromBytes(File.ReadAllBytes(path), prefer: blank.Format);
             return PKMConverter.ConvertToType(pk, sav.BlankPKM.GetType(), out path); // no sneaky plz; reuse string
         }
-        private static void RefreshMGDB()
-        {
-            Legal.RefreshMGDB(MGDatabasePath);
-        }
 
         private void OpenSAV(SaveFile sav, string path)
         {
             if (sav == null || sav.Version == GameVersion.Invalid)
             { WinFormsUtil.Error("Invalid save file loaded. Aborting.", path); return; }
 
-            if (!SanityCheckSAV(ref sav, path))
+            sav.SetFileInfo(path);
+            if (!SanityCheckSAV(ref sav))
                 return;
             StoreLegalSaveGameData(sav);
             PKMUtil.Initialize(sav); // refresh sprite generator
@@ -744,7 +753,7 @@ namespace PKHeX.WinForms
 
             ResetSAVPKMEditors(sav);
 
-            Text = GetProgramTitle(sav, path);
+            Text = GetProgramTitle(sav);
             TryBackupExportCheck(sav, path);
 
             PKMConverter.UpdateConfig(sav.SubRegion, sav.Country, sav.ConsoleRegion, sav.OT, sav.Gender, sav.Language);
@@ -776,7 +785,7 @@ namespace PKHeX.WinForms
             PKME_Tabs.TemplateFields(LoadTemplate(sav));
             sav.Edited = false;
         }
-        private static string GetProgramTitle(SaveFile sav, string path)
+        private static string GetProgramTitle(SaveFile sav)
         {
 #if DEBUG
             var d = File.GetLastWriteTime(System.Reflection.Assembly.GetEntryAssembly().Location);
@@ -785,17 +794,8 @@ namespace PKHeX.WinForms
             string date = Resources.ProgramVersion;
 #endif
             string title = $"PKH{(HaX ? "a" : "e")}X ({date}) - {sav.GetType().Name}: ";
-            if (string.IsNullOrWhiteSpace(path)) // Blank save file
-            {
-                sav.FilePath = null;
-                sav.FileName = "Blank Save File";
+            if (!sav.Exportable) // Blank save file
                 return title + $"{sav.FileName} [{sav.OT} ({sav.Version})]";
-            }
-
-            sav.FilePath = Path.GetDirectoryName(path);
-            sav.FileName = Path.GetExtension(path) == ".bak"
-                ? Path.GetFileName(path).Split(new[] {" ["}, StringSplitOptions.None)[0]
-                : Path.GetFileName(path);
             return title + $"{Path.GetFileNameWithoutExtension(Util.CleanFileName(sav.BAKName))}"; // more descriptive
         }
         private static bool TryBackupExportCheck(SaveFile sav, string path)
@@ -820,12 +820,12 @@ namespace PKHeX.WinForms
                 "If the path is a removable disk (SD card), please ensure the write protection switch is not set.");
             return false;
         }
-        private static bool SanityCheckSAV(ref SaveFile sav, string path)
+        private static bool SanityCheckSAV(ref SaveFile sav)
         {
             // Finish setting up the save file.
             if (sav.Generation < 3)
             {
-                bool vc = path.EndsWith("dat");
+                bool vc = sav.FileName.EndsWith("dat");
                 Legal.AllowGBCartEra = !vc; // physical cart selected
                 Legal.AllowGen1Tradeback = true;
                 if (Legal.AllowGBCartEra && sav.Generation == 1)
@@ -977,7 +977,7 @@ namespace PKHeX.WinForms
                 return;
 
             var sav = C_SAV.SAV;
-            if (TryLoadPKM(input, url, sav.Generation.ToString(), sav))
+            if (TryLoadPKM(input, sav.Generation.ToString()))
                 return;
             if (TryLoadMysteryGift(input, url, null))
                 return;

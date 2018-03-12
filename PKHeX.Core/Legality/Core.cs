@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using static PKHeX.Core.Encounters1;
 using static PKHeX.Core.Encounters2;
@@ -9,33 +8,16 @@ using static PKHeX.Core.Encounters4;
 using static PKHeX.Core.Encounters5;
 using static PKHeX.Core.Encounters6;
 using static PKHeX.Core.Encounters7;
-using static PKHeX.Core.EncountersWC3;
 using static PKHeX.Core.LegalityCheckStrings;
 
 namespace PKHeX.Core
 {
     public static partial class Legal
     {
-        /// <summary>Event Database for Generation 3</summary>
-        public static MysteryGift[] MGDB_G3 { get; private set; } = new MysteryGift[0];
-
-        /// <summary>Event Database for Generation 4</summary>
-        public static MysteryGift[] MGDB_G4 { get; private set; } = new MysteryGift[0];
-
-        /// <summary>Event Database for Generation 5</summary>
-        public static MysteryGift[] MGDB_G5 { get; private set; } = new MysteryGift[0];
-
-        /// <summary>Event Database for Generation 6</summary>
-        public static MysteryGift[] MGDB_G6 { get; private set; } = new MysteryGift[0];
-
-        /// <summary>Event Database for Generation 7</summary>
-        public static MysteryGift[] MGDB_G7 { get; private set; } = new MysteryGift[0];
-
         /// <summary>Setting to specify if an analysis should permit data sourced from the physical cartridge era of GameBoy games.</summary>
         public static bool AllowGBCartEra { get; set; }
         public static bool AllowGen1Tradeback { get; set; }
-        public static bool AllowGen2VCCrystal => false;
-        public static bool AllowGen2Crystal(bool Korean) => !Korean && (AllowGBCartEra || AllowGen2VCCrystal); // Pokemon Crystal was never released in Korea
+        public static bool AllowGen2Crystal(bool Korean) => !Korean; // Pokemon Crystal was never released in Korea
         public static bool AllowGen2Crystal(PKM pkm) => AllowGen2Crystal(pkm.Korean);
         public static bool AllowGen2MoveReminder(PKM pkm) => !pkm.Korean && AllowGBCartEra; // Pokemon Stadium 2 was never released in Korea
 
@@ -94,153 +76,66 @@ namespace PKHeX.Core
 
         // Gen 7
         private static readonly EggMoves[] EggMovesSM = EggMoves7.GetArray(Data.UnpackMini(Util.GetBinaryResource("eggmove_sm.pkl"), "sm"));
-        private static readonly Learnset[] LevelUpSM = Learnset7.GetArray(Data.UnpackMini(Util.GetBinaryResource("lvlmove_sm.pkl"), "sm"));
+        private static readonly Learnset[] LevelUpSM = Learnset6.GetArray(Data.UnpackMini(Util.GetBinaryResource("lvlmove_sm.pkl"), "sm"));
         private static readonly EggMoves[] EggMovesUSUM = EggMoves7.GetArray(Data.UnpackMini(Util.GetBinaryResource("eggmove_uu.pkl"), "uu"));
-        private static readonly Learnset[] LevelUpUSUM = Learnset7.GetArray(Data.UnpackMini(Util.GetBinaryResource("lvlmove_uu.pkl"), "uu"));
+        private static readonly Learnset[] LevelUpUSUM = Learnset6.GetArray(Data.UnpackMini(Util.GetBinaryResource("lvlmove_uu.pkl"), "uu"));
 
         // Setup Help
-        private static HashSet<MysteryGift> GetPCDDB(byte[] bin)
+        static Legal()
         {
-            var db = new HashSet<MysteryGift>();
-            for (int i = 0; i < bin.Length; i += PCD.Size)
-            {
-                byte[] data = new byte[PCD.Size];
-                Buffer.BlockCopy(bin, i, data, 0, PCD.Size);
-                db.Add(new PCD(data));
-            }
-            return db;
+            // Misc Fixes to Data pertaining to legality constraints
+            EggMovesUSUM[198].Moves = EggMovesUSUM[198].Moves.Take(15).ToArray(); // Remove Punishment from USUM Murkrow (no species can pass it #1829)
         }
-        private static HashSet<MysteryGift> GetPGFDB(byte[] bin)
-        {
-            var db = new HashSet<MysteryGift>();
-            for (int i = 0; i < bin.Length; i += PGF.Size)
-            {
-                byte[] data = new byte[PGF.Size];
-                Buffer.BlockCopy(bin, i, data, 0, PGF.Size);
-                db.Add(new PGF(data));
-            }
-            return db;
-        }
-        private static HashSet<MysteryGift> GetWC6DB(byte[] wc6bin, byte[] wc6full)
-        {
-            var db = new HashSet<MysteryGift>();
-            for (int i = 0; i < wc6bin.Length; i += WC6.Size)
-            {
-                byte[] data = new byte[WC6.Size];
-                Buffer.BlockCopy(wc6bin, i, data, 0, WC6.Size);
-                db.Add(new WC6(data));
-            }
-            for (int i = 0; i < wc6full.Length; i += WC6.SizeFull)
-            {
-                byte[] data = new byte[WC6.SizeFull];
-                Buffer.BlockCopy(wc6full, i, data, 0, WC6.SizeFull);
-                db.Add(new WC6(data));
-            }
-            return db;
-        }
-        private static HashSet<MysteryGift> GetWC7DB(byte[] wc7bin, byte[] wc7full)
-        {
-            var db = new HashSet<MysteryGift>();
-            for (int i = 0; i < wc7bin.Length; i += WC7.Size)
-            {
-                byte[] data = new byte[WC7.Size];
-                Buffer.BlockCopy(wc7bin, i, data, 0, WC7.Size);
-                db.Add(new WC7(data));
-            }
-            for (int i = 0; i < wc7full.Length; i += WC7.SizeFull)
-            {
-                byte[] data = new byte[WC7.SizeFull];
-                Buffer.BlockCopy(wc7full, i, data, 0, WC7.SizeFull);
-                db.Add(new WC7(data));
-            }
-            return db;
-        }
-        public static void RefreshMGDB(string localDbPath)
-        {
-            var g4 = GetPCDDB(Util.GetBinaryResource("wc4.pkl"));
-            var g5 = GetPGFDB(Util.GetBinaryResource("pgf.pkl"));
-            var g6 = GetWC6DB(Util.GetBinaryResource("wc6.pkl"), Util.GetBinaryResource("wc6full.pkl"));
-            var g7 = GetWC7DB(Util.GetBinaryResource("wc7.pkl"), Util.GetBinaryResource("wc7full.pkl"));
 
-            if (Directory.Exists(localDbPath))
-                foreach (var file in Directory.EnumerateFiles(localDbPath, "*", SearchOption.AllDirectories))
-                {
-                    var fi = new FileInfo(file);
-                    if (!MysteryGift.IsMysteryGift(fi.Length))
-                        continue;
-
-                    var gift = MysteryGift.GetMysteryGift(File.ReadAllBytes(file), fi.Extension);
-                    switch (gift?.Format)
-                    {
-                        case 4: g4.Add(gift); continue;
-                        case 5: g5.Add(gift); continue;
-                        case 6: g6.Add(gift); continue;
-                        case 7: g7.Add(gift); continue;
-                    }
-                }
-
-            MGDB_G3 = Encounter_WC3; // hardcoded
-            MGDB_G4 = g4.ToArray();
-            MGDB_G5 = g5.ToArray();
-            MGDB_G6 = g6.ToArray();
-            MGDB_G7 = g7.ToArray();
-        }
+        public static void RefreshMGDB(string localDbPath) => EncounterEvent.RefreshMGDB(localDbPath);
 
         // Moves
-        internal static int[] GetMinLevelLearnMove(int species, int Generation, List<int> moves)
+        internal static int[] GetMinLevelLearnMoveG1(int species, List<int> moves)
         {
             var r = new int[moves.Count];
-            switch (Generation)
+
+            int index = PersonalTable.RB.GetFormeIndex(species, 0);
+            if (index == 0)
+                return r;
+
+            var pi_rb = ((PersonalInfoG1)PersonalTable.RB[index]).Moves;
+            var pi_y = ((PersonalInfoG1)PersonalTable.Y[index]).Moves;
+
+            for (int m = 0; m < moves.Count; m++)
             {
-                case 1:
-                    {
-                        int index = PersonalTable.RB.GetFormeIndex(species, 0);
-                        if (index == 0)
-                            return r;
-
-                        var pi_rb = ((PersonalInfoG1)PersonalTable.RB[index]).Moves;
-                        var pi_y = ((PersonalInfoG1)PersonalTable.Y[index]).Moves;
-
-                        for (int m = 0; m < moves.Count; m++)
-                        {
-                            if (pi_rb.Contains(moves[m]) || pi_y.Contains(moves[m]))
-                                r[m] = 1;
-                            else
-                            {
-                                var rb_level = LevelUpRB[index].GetLevelLearnMove(moves[m]);
-                                var y_level = LevelUpY[index].GetLevelLearnMove(moves[m]);
-                                // 0 means it is not learned in that game, select the other game
-                                r[m] = rb_level == 0 ? y_level :
-                                       y_level == 0 ? rb_level :
-                                       Math.Min(rb_level, y_level);
-                            }
-                        }
-                        break;
-                    }
+                if (pi_rb.Contains(moves[m]) || pi_y.Contains(moves[m]))
+                    r[m] = 1;
+                else
+                {
+                    var rb_level = LevelUpRB[index].GetLevelLearnMove(moves[m]);
+                    var y_level = LevelUpY[index].GetLevelLearnMove(moves[m]);
+                    // < 0 means it is not learned in that game, select the other game
+                    if (rb_level < 0)
+                        r[m] = y_level;
+                    else if (y_level < 0)
+                        r[m] = rb_level;
+                    else
+                        r[m] = Math.Min(rb_level, y_level);
+                }
             }
             return r;
         }
-        internal static int[] GetMaxLevelLearnMove(int species, int Generation, List<int> moves)
+        internal static int[] GetMaxLevelLearnMoveG1(int species, List<int> moves)
         {
             var r = new int[moves.Count];
-            switch (Generation)
+
+            int index = PersonalTable.RB.GetFormeIndex(species, 0);
+            if (index == 0)
+                return r;
+
+            var pi_rb = ((PersonalInfoG1)PersonalTable.RB[index]).Moves;
+            var pi_y = ((PersonalInfoG1)PersonalTable.Y[index]).Moves;
+
+            for (int m = 0; m < moves.Count; m++)
             {
-                case 1:
-                    {
-                        int index = PersonalTable.RB.GetFormeIndex(species, 0);
-                        if (index == 0)
-                            return r;
-
-                        var pi_rb = ((PersonalInfoG1)PersonalTable.RB[index]).Moves;
-                        var pi_y = ((PersonalInfoG1)PersonalTable.Y[index]).Moves;
-
-                        for (int m = 0; m < moves.Count; m++)
-                        {
-                            bool start = pi_rb.Contains(moves[m]) && pi_y.Contains(moves[m]);
-                            r[m] = start ? 1 : Math.Max(LevelUpRB[index].GetLevelLearnMove(moves[m]), LevelUpY[index].GetLevelLearnMove(moves[m]));
-                        }
-                        break;
-                    }
+                bool start = pi_rb.Contains(moves[m]) && pi_y.Contains(moves[m]);
+                r[m] = start ? 1 : Math.Max(GetHighest(LevelUpRB), GetHighest(LevelUpY));
+                int GetHighest(IReadOnlyList<Learnset> learn) => learn[index].GetLevelLearnMove(moves[m]);
             }
             return r;
         }
@@ -437,16 +332,12 @@ namespace PKHeX.Core
                 r.AddRange(GetRelearnLVLMoves(pkm, species, 100, pkm.AltForm, version));
             return r.Distinct();
         }
-        internal static List<int>[] GetShedinjaEvolveMoves(PKM pkm, int lvl = -1, int generation = 0)
+        internal static IList<int> GetShedinjaEvolveMoves(PKM pkm, int lvl = -1, int generation = 0)
         {
-            var size = pkm.Format > 3 ? 4 : 3;
-            List<int>[] r = new List<int>[size + 1];
-            for (int i = 1; i <= size; i++)
-                r[i] = new List<int>();
             if (lvl == -1)
                 lvl = pkm.CurrentLevel;
             if (pkm.Species != 292 || lvl < 20)
-                return r;
+                return new List<int>();
 
             // If nincada evolves into Ninjask an learn in the evolution a move from ninjask learnset pool
             // Shedinja would appear with that move learned. Only one move above level 20 allowed, only in generations 3 and 4
@@ -455,17 +346,23 @@ namespace PKHeX.Core
                 case 0: // Default (both)
                 case 3: // Ninjask have the same learnset in every gen 3 games
                     if (pkm.InhabitedGeneration(3))
-                        r[3] = LevelUpE[291].GetMoves(lvl, 20).ToList();
+                        return LevelUpE[291].GetMoves(lvl, 20).ToList();
 
                     if (generation == 0)
                         goto case 4;
                     break;
                 case 4: // Ninjask have the same learnset in every gen 4 games
                     if (pkm.InhabitedGeneration(4))
-                        r[4] = LevelUpPt[291].GetMoves(lvl, 20).ToList();
+                        return LevelUpPt[291].GetMoves(lvl, 20);
                     break;
             }
-            return r;
+            return new List<int>();
+        }
+        internal static int GetShedinjaMoveLevel(int species, int move, int generation)
+        {
+            var src = generation == 4 ? LevelUpPt : LevelUpE;
+            var moves = src[species];
+            return moves.GetLevelLearnMove(move);
         }
         internal static int[] GetBaseEggMoves(PKM pkm, int species, GameVersion gameSource, int lvl)
         {
@@ -608,7 +505,7 @@ namespace PKHeX.Core
                 var list = i >= index ? preevomoves : evomoves;
                 list.AddRange(moves);
             }
-            return preevomoves.Where(z => !evomoves.Contains(z)).Distinct().ToList();
+            return preevomoves.Except(evomoves).Distinct().ToList();
         }
 
         // Encounter
@@ -685,7 +582,7 @@ namespace PKHeX.Core
             }
             // Initial Moves could be duplicated in the level up table
             // level up table moves have preference
-            var moves = InitialMoves.Where(p => p != 0 && !LevelUpMoves.Any(m => m == p)).ToList();
+            var moves = InitialMoves.Where(p => p != 0).Except(LevelUpMoves).ToList();
             // If all of the personal table moves can't be included, the last moves have preference.
             int pop = moves.Count - diff;
             if (pop > 0)
@@ -1106,6 +1003,26 @@ namespace PKHeX.Core
                 default: return Enumerable.Empty<int>();
             }
         }
+        internal static int GetDebutGeneration(int species)
+        {
+            if (species <= 0)
+                return 0;
+            if (species <= MaxSpeciesID_1)
+                return 1;
+            if (species <= MaxSpeciesID_2)
+                return 2;
+            if (species <= MaxSpeciesID_3)
+                return 3;
+            if (species <= MaxSpeciesID_4)
+                return 4;
+            if (species <= MaxSpeciesID_5)
+                return 5;
+            if (species <= MaxSpeciesID_6)
+                return 6;
+            if (species <= MaxSpeciesID_7_USUM)
+                return 7;
+            return -1;
+        }
 
         internal static int GetMaxLanguageID(int generation)
         {
@@ -1250,7 +1167,7 @@ namespace PKHeX.Core
                 return true;
             if (IsEvolvedFormChange(pkm))
                 return true;
-            if (pkm.Species == 718 && pkm.InhabitedGeneration(7) && pkm.AltForm != 1)
+            if (species == 718 && pkm.InhabitedGeneration(7) && pkm.AltForm > 1)
                 return true;
             return false;
         }
@@ -1629,7 +1546,8 @@ namespace PKHeX.Core
                 return new List<DexLevel>
                 {
                     new DexLevel { Species = 292, Level = lvl, MinLevel = 20 },
-                    new DexLevel { Species = 290, Level = lvl - 1, MinLevel = 1 }
+                    new DexLevel { Species = 290, Level = pkm.GenNumber < 5 ? lvl : lvl-1, MinLevel = 1 } 
+                    // Shedinja spawns after evolving, which is after level up moves were prompted. Not for future generations.
                 };
             if (maxspeciesorigin == -1 && pkm.InhabitedGeneration(2) && pkm.GenNumber == 1)
                 maxspeciesorigin = MaxSpeciesID_2;

@@ -46,14 +46,12 @@ namespace PKHeX.Core
         public SAV3Colosseum(byte[] data, SAV3GCMemoryCard MC) : this(data) { this.MC = MC; BAK = MC.Data; }
         public SAV3Colosseum(byte[] data = null)
         {
-            Data = data == null ? new byte[SaveUtil.SIZE_G3COLO] : (byte[])data.Clone();
+            Data = data ?? new byte[SaveUtil.SIZE_G3COLO];
             BAK = (byte[])Data.Clone();
             Exportable = !Data.All(z => z == 0);
 
             if (SaveUtil.GetIsG3COLOSAV(Data) != GameVersion.COLO)
                 return;
-
-            OriginalData = (byte[])Data.Clone();
 
             // Scan all 3 save slots for the highest counter
             for (int i = 0; i < SLOT_COUNT; i++)
@@ -113,7 +111,6 @@ namespace PKHeX.Core
                     PartyCount++;
         }
 
-        private readonly byte[] OriginalData;
         public override byte[] Write(bool DSV, bool GCI)
         {
             StrategyMemo.FinalData.CopyTo(Data, Memo);
@@ -124,7 +121,7 @@ namespace PKHeX.Core
             byte[] newSAV = EncryptColosseum(Data, digest);
 
             // Put save slot back in original save data
-            byte[] newFile = (byte[])OriginalData.Clone();
+            byte[] newFile = MC != null ? MC.SelectedSaveData : (byte[])BAK.Clone();
             Array.Copy(newSAV, 0, newFile, SLOT_START + SaveIndex*SLOT_SIZE, newSAV.Length);
 
             // Return the gci if Memory Card is not being exported
@@ -147,12 +144,12 @@ namespace PKHeX.Core
         public override PKM BlankPKM => new CK3();
         public override Type PKMType => typeof(CK3);
 
-        public override int MaxMoveID => 354;
+        public override int MaxMoveID => Legal.MaxMoveID_3;
         public override int MaxSpeciesID => Legal.MaxSpeciesID_3;
-        public override int MaxAbilityID => 77;
-        public override int MaxItemID => 547;
-        public override int MaxBallID => 0xC;
-        public override int MaxGameID => 5;
+        public override int MaxAbilityID => Legal.MaxAbilityID_3;
+        public override int MaxBallID => Legal.MaxBallID_3;
+        public override int MaxItemID => Legal.MaxItemID_3_COLO;
+        public override int MaxGameID => Legal.MaxGameID_3;
         
         public override int MaxEV => 255;
         public override int Generation => 3;

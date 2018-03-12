@@ -34,11 +34,11 @@ namespace PKHeX.Core
                 var id = (LanguageID) l;
                 return new[]
                 {
-                    new WC3 { Species = 239, Level = 20, Language = l, Fateful = true, Met_Location = 164, TID = 41400, SID = -1, OT_Gender = 0, OT_Name = h[l], CardTitle = $"Trade Togepi ({id})",     Method = PIDType.CXD, Moves = new[] { 008, 007, 009, 238 } }, // Elekid @ Snagem Hideout
-                    new WC3 { Species = 307, Level = 20, Language = l, Fateful = true, Met_Location = 116, TID = 37149, SID = -1, OT_Gender = 0, OT_Name = d[l], CardTitle = $"Trade Trapinch ({id})",   Method = PIDType.CXD, Moves = new[] { 223, 093, 247, 197 } }, // Meditite @ Pyrite Town
-                    new WC3 { Species = 213, Level = 20, Language = l, Fateful = true, Met_Location = 116, TID = 37149, SID = -1, OT_Gender = 0, OT_Name = d[l], CardTitle = $"Trade Surskit ({id})",    Method = PIDType.CXD, Moves = new[] { 092, 164, 188, 277 } }, // Shuckle @ Pyrite Town
-                    new WC3 { Species = 246, Level = 20, Language = l, Fateful = true, Met_Location = 116, TID = 37149, SID = -1, OT_Gender = 0, OT_Name = d[l], CardTitle = $"Trade Wooper ({id})",     Method = PIDType.CXD, Moves = new[] { 201, 349, 044, 200 } }, // Larvitar @ Pyrite Town
-                    new WC3 { Species = 311, Level = 13, Language = l, Fateful = false, Met_Location = 254, TID = 37149, SID = 0, OT_Gender = 0, OT_Name = d[l], CardTitle = $"Special Gift ({id})",      Method = PIDType.CXD }, // Plusle @ Ingame Trade
+                    new WC3 { Species = 239, Level = 20, Language = l, Fateful = true, Location = 164, TID = 41400, SID = -1, OT_Gender = 0, OT_Name = h[l], CardTitle = $"Trade Togepi ({id})",     Method = PIDType.CXD, Moves = new[] { 008, 007, 009, 238 } }, // Elekid @ Snagem Hideout
+                    new WC3 { Species = 307, Level = 20, Language = l, Fateful = true, Location = 116, TID = 37149, SID = -1, OT_Gender = 0, OT_Name = d[l], CardTitle = $"Trade Trapinch ({id})",   Method = PIDType.CXD, Moves = new[] { 223, 093, 247, 197 } }, // Meditite @ Pyrite Town
+                    new WC3 { Species = 213, Level = 20, Language = l, Fateful = true, Location = 116, TID = 37149, SID = -1, OT_Gender = 0, OT_Name = d[l], CardTitle = $"Trade Surskit ({id})",    Method = PIDType.CXD, Moves = new[] { 092, 164, 188, 277 } }, // Shuckle @ Pyrite Town
+                    new WC3 { Species = 246, Level = 20, Language = l, Fateful = true, Location = 116, TID = 37149, SID = -1, OT_Gender = 0, OT_Name = d[l], CardTitle = $"Trade Wooper ({id})",     Method = PIDType.CXD, Moves = new[] { 201, 349, 044, 200 } }, // Larvitar @ Pyrite Town
+                    new WC3 { Species = 311, Level = 13, Language = l, Fateful = false, Location = 254, TID = 37149, SID = 0, OT_Gender = 0, OT_Name = d[l], CardTitle = $"Special Gift ({id})",      Method = PIDType.CXD }, // Plusle @ Ingame Trade
                     new WC3 { Species = 250, Level = 70, Language = l, Fateful = false, /*loc already set*/ TID = 10048, SID = 0, OT_Gender = 0, OT_Name = m[l], CardTitle = $"Mt. Battle Ho-oh ({id})", Method = PIDType.CXD, Shiny = false } // Ho-oh @ Mt. Battle
                 };
             }
@@ -253,6 +253,6 @@ namespace PKHeX.Core
             new WC3 { Species = 360, IsEgg = true, Level = 05, Met_Level = 05, TID = 50318, OT_Gender = 0, OT_Name = "ポケパーク", Version = (int)GameVersion.R, Moves = new[]{321}, Method = PIDType.BACD_R }, // Wynaut with Tickle
         };
 
-        internal static readonly MysteryGift[] Encounter_WC3 = Encounter_Event3.Concat(Encounter_Event3_RS).Concat(Encounter_Event3_FRLG.Concat(Encounter_Event3_Common)).ToArray();
+        internal static readonly MysteryGift[] Encounter_WC3 = EncounterUtil.ConcatAll(Encounter_Event3, Encounter_Event3_RS, Encounter_Event3_FRLG, Encounter_Event3_Common);
     }
 }

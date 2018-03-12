@@ -15,7 +15,7 @@ namespace PKHeX.Core
 
         public WC7(byte[] data = null)
         {
-            Data = (byte[])(data?.Clone() ?? new byte[Size]);
+            Data = data ?? new byte[Size];
             if (Data.Length == SizeFull)
             {
                 byte[] wc6 = new byte[Size];
@@ -180,7 +180,7 @@ namespace PKHeX.Core
         public int PIDType {
             get => Data[0xA3];
             set => Data[0xA3] = (byte)value; }
-        public int EggLocation {
+        public override int EggLocation {
             get => BitConverter.ToUInt16(Data, 0xA4);
             set => BitConverter.GetBytes((ushort)value).CopyTo(Data, 0xA4); }
         public int MetLocation  {
@@ -277,6 +277,7 @@ namespace PKHeX.Core
             }
         }
         public bool IsNicknamed => Nickname.Length > 0 || IsEgg;
+        public override int Location { get => MetLocation; set => MetLocation = (ushort)value; }
 
         public override int[] Moves
         {
@@ -390,28 +391,20 @@ namespace PKHeX.Core
             pk.IsNicknamed = IsNicknamed;
             pk.Nickname = IsNicknamed ? Nickname : PKX.GetSpeciesNameGeneration(Species, pk.Language, Format);
 
-            // More 'complex' logic to determine final values
-            
-            // Dumb way to generate random IVs.
             int[] finalIVs = new int[6];
-            switch (IVs[0])
+            var ivflag = IVs.FirstOrDefault(iv => (byte)(iv - 0xFC) < 3);
+            if (ivflag == 0) // Random IVs
             {
-                case 0xFE:
-                    do { // 3 Perfect IVs
-                    for (int i = 0; i < 6; i++)
-                        finalIVs[i] = IVs[i] > 31 ? (int)(Util.Rand32() & 0x1F) : IVs[i];
-                    } while (finalIVs.Count(r => r == 31) < 3); // 3*31
-                    break;
-                case 0xFD: 
-                    do { // 2 other 31s
-                    for (int i = 0; i < 6; i++)
-                        finalIVs[i] = IVs[i] > 31 ? (int)(Util.Rand32() & 0x1F) : IVs[i];
-                    } while (finalIVs.Count(r => r == 31) < 2); // 2*31
-                    break;
-                default: // Random IVs
-                    for (int i = 0; i < 6; i++)
-                        finalIVs[i] = IVs[i] > 31 ? (int)(Util.Rand32() & 0x1F) : IVs[i];
-                    break;
+                for (int i = 0; i < 6; i++)
+                    finalIVs[i] = IVs[i] > 31 ? (int)(Util.Rand32() & 0x1F) : IVs[i];
+            }
+            else // 1/2/3 perfect IVs
+            {
+                int IVCount = ivflag - 0xFB;
+                do { finalIVs[Util.Rand32() % 6] = 31; }
+                while (finalIVs.Count(r => r == 31) < IVCount);
+                for (int i = 0; i < 6; i++)
+                    finalIVs[i] = finalIVs[i] == 31 ? 31 : (int)(Util.Rand32() & 0x1F);
             }
             pk.IVs = finalIVs;
 
