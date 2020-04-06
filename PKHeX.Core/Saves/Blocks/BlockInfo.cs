@@ -6,11 +6,11 @@ namespace PKHeX.Core
     public abstract class BlockInfo
     {
         // General
-        public uint ID;
-        public int Offset;
-        public int Length;
+        public uint ID { get; set; }
+        public int Offset { get; set; }
+        public int Length { get; set; }
 
-        public string Summary => $"{ID:00}: {Offset:X5}-{Offset + Length:X5}, {Length:X5}";
+        public string Summary => $"{ID:00}: {Offset:X5}-{Offset + Length - 1:X5}, {Length:X5}";
 
         protected abstract bool ChecksumValid(byte[] data);
         protected abstract void SetChecksum(byte[] data);

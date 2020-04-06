@@ -3,17 +3,14 @@
 namespace PKHeX.Core
 {
     /// <summary>
-    /// <see cref="PersonalInfo"/> class with values from the Sun/Moon games.
+    /// <see cref="PersonalInfo"/> class with values from the Sun &amp; Moon games.
     /// </summary>
     public class PersonalInfoSM : PersonalInfoXY
     {
         public new const int SIZE = 0x54;
-        public PersonalInfoSM(byte[] data)
-        {
-            if (data.Length != SIZE)
-                return;
-            Data = data;
 
+        public PersonalInfoSM(byte[] data) : base(data)
+        {
             TMHM = GetBits(Data, 0x28, 0x10); // 36-39
             TypeTutors = GetBits(Data, 0x38, 0x4); // 40
 
@@ -22,6 +19,7 @@ namespace PKHeX.Core
                 GetBits(Data, 0x3C, 0x0A),
             };
         }
+
         public override byte[] Write()
         {
             SetBits(TMHM).CopyTo(Data, 0x28);

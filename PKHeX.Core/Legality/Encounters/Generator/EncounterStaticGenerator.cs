@@ -2,6 +2,15 @@
 using System.Linq;
 
 using static PKHeX.Core.Legal;
+using static PKHeX.Core.Encounters1;
+using static PKHeX.Core.Encounters2;
+using static PKHeX.Core.Encounters3;
+using static PKHeX.Core.Encounters4;
+using static PKHeX.Core.Encounters5;
+using static PKHeX.Core.Encounters6;
+using static PKHeX.Core.Encounters7;
+using static PKHeX.Core.Encounters7b;
+using static PKHeX.Core.Encounters8;
 
 namespace PKHeX.Core
 {
@@ -9,23 +18,43 @@ namespace PKHeX.Core
     {
         public static IEnumerable<EncounterStatic> GetPossible(PKM pkm, GameVersion gameSource = GameVersion.Any)
         {
+            int gen = pkm.GenNumber;
+            int maxID = gen == 2 ? MaxSpeciesID_2 : gen == 1 ? MaxSpeciesID_1 : -1;
+            var dl = EvolutionChain.GetValidPreEvolutions(pkm, maxID);
+            return GetPossible(pkm, dl, gameSource);
+        }
+
+        public static IEnumerable<EncounterStatic> GetPossible(PKM pkm, IReadOnlyList<DexLevel> vs, GameVersion gameSource = GameVersion.Any)
+        {
             if (gameSource == GameVersion.Any)
                 gameSource = (GameVersion)pkm.Version;
 
-            return GetStaticEncounters(pkm, gameSource: gameSource);
+            var encs = GetStaticEncounters(pkm, vs, gameSource);
+            return encs.Where(e => ParseSettings.AllowGBCartEra || !GameVersion.GBCartEraOnly.Contains(e.Version));
         }
+
         public static IEnumerable<EncounterStatic> GetValidStaticEncounter(PKM pkm, GameVersion gameSource = GameVersion.Any)
         {
             var poss = GetPossible(pkm, gameSource: gameSource);
 
             int lvl = GetMinLevelEncounter(pkm);
             if (lvl < 0)
-                yield break;
+                return Enumerable.Empty<EncounterStatic>();
 
             // Back Check against pkm
-            var enc = GetMatchingStaticEncounters(pkm, poss, lvl);
-            foreach (var z in enc)
-                yield return z;
+            return GetMatchingStaticEncounters(pkm, poss, lvl);
+        }
+
+        public static IEnumerable<EncounterStatic> GetValidStaticEncounter(PKM pkm, IReadOnlyList<DexLevel> vs, GameVersion gameSource)
+        {
+            var poss = GetPossible(pkm, vs, gameSource: gameSource);
+
+            int lvl = GetMinLevelEncounter(pkm);
+            if (lvl < 0)
+                return Enumerable.Empty<EncounterStatic>();
+
+            // Back Check against pkm
+            return GetMatchingStaticEncounters(pkm, poss, lvl);
         }
 
         private static IEnumerable<EncounterStatic> GetMatchingStaticEncounters(PKM pkm, IEnumerable<EncounterStatic> poss, int lvl)
@@ -37,7 +66,7 @@ namespace PKHeX.Core
                 if (!GetIsMatchStatic(pkm, e, lvl))
                     continue;
 
-                if (pkm.FatefulEncounter != e.Fateful)
+                if (e.IsMatchDeferred(pkm))
                     deferred.Add(e);
                 else
                     yield return e;
@@ -45,152 +74,27 @@ namespace PKHeX.Core
             foreach (var e in deferred)
                 yield return e;
         }
+
         private static bool GetIsMatchStatic(PKM pkm, EncounterStatic e, int lvl)
         {
-            if (e.Nature != Nature.Random && pkm.Nature != (int)e.Nature)
-                return false;
-            if (pkm.WasEgg != e.EggEncounter && pkm.Egg_Location == 0 && pkm.Format > 3 && pkm.GenNumber > 3 && !pkm.IsEgg)
-                return false;
-            if (e is EncounterStaticPID p && p.PID != pkm.PID)
+            if (!e.IsMatch(pkm, lvl))
                 return false;
 
-            if (pkm.Gen3 && e.EggLocation != 0) // Gen3 Egg
-            {
-                if (pkm.Format == 3 && pkm.IsEgg && e.EggLocation != pkm.Met_Location)
-                    return false;
-            }
-            else if (pkm.VC || pkm.GenNumber <= 2 && e.EggLocation != 0) // Gen2 Egg
-            {
-                if (pkm.Format <= 2)
-                {
-                    if (pkm.IsEgg)
-                    {
-                        if (pkm.Met_Location != 0 && pkm.Met_Level != 0)
-                            return false;
-                    }
-                    else
-                    {
-                        switch (pkm.Met_Level)
-                        {
-                            case 0 when pkm.Met_Location != 0:
-                                return false;
-                            case 1 when pkm.Met_Location == 0:
-                                return false;
-                            default:
-                                if (pkm.Met_Location == 0)
-                                    return false;
-                                break;
-                        }
-                    }
-                    if (pkm.Met_Level == 1)
-                        lvl = 5; // met @ 1, hatch @ 5.
-                }
-            }
-            else if (e.EggLocation != pkm.Egg_Location)
-            {
-                if (pkm.IsEgg) // unhatched
-                {
-                    if (e.EggLocation != pkm.Met_Location)
-                        return false;
-                    if (pkm.Egg_Location != 0)
-                        return false;
-                }
-                else if (pkm.Gen4)
-                {
-                    if (pkm.Egg_Location != 2002) // Link Trade
-                    {
-                        // check Pt/HGSS data
-                        if (pkm.Format <= 4)
-                            return false; // must match
-                        if (e.EggLocation >= 3000 || e.EggLocation <= 2010) // non-Pt/HGSS egg gift
-                            return false;
-
-                        // transferring 4->5 clears pt/hgss location value and keeps Faraway Place
-                        if (pkm.Egg_Location != 3002) // Faraway Place
-                            return false;
-                    }
-                }
-                else
-                {
-                    if (pkm.Egg_Location != 30002) // Link Trade
-                        return false;
-                }
-            }
-            else if (e.EggLocation != 0 && pkm.Gen4)
-            {
-                // Check the inverse scenario for 4->5 eggs
-                if (e.EggLocation < 3000 && e.EggLocation > 2010) // Pt/HGSS egg gift
-                {
-                    if (pkm.Format > 4)
-                        return false; // locations match when it shouldn't
-                }
-            }
-
-            if (pkm.HasOriginalMetLocation)
-            {
-                if (!e.EggEncounter && e.Location != 0 && e.Location != pkm.Met_Location)
-                    return false;
-                if (e.Level != lvl)
-                {
-                    if (!(pkm.Format == 3 && e.EggEncounter && lvl == 0))
-                        return false;
-                }
-            }
-            else if (e.Level > lvl)
+            if (pkm is PK1 pk1 && pk1.Gen1_NotTradeback && !IsValidCatchRatePK1(e, pk1))
                 return false;
 
-            if (e.Gender != -1 && e.Gender != pkm.Gender)
-                return false;
-            if (e.Form != pkm.AltForm && !e.SkipFormCheck && !IsFormChangeable(pkm, e.Species))
-                return false;
-            if (e.EggLocation == 60002 && e.Relearn[0] == 0 && pkm.RelearnMoves.Any(z => z != 0)) // gen7 eevee edge case
+            if (!ParseSettings.AllowGBCartEra && GameVersion.GBCartEraOnly.Contains(e.Version))
                 return false;
 
-            if (e.IVs != null && (e.Generation > 2 || pkm.Format <= 2)) // 1,2->7 regenerates IVs, only check if original IVs still exist
-                for (int i = 0; i < 6; i++)
-                    if (e.IVs[i] != -1 && e.IVs[i] != pkm.IVs[i])
-                        return false;
-
-            if (e.Contest != null)
-                for (int i = 0; i < 6; i++)
-                    if (e.Contest[i] > pkm.Contest[i])
-                        return false;
-
-            // Defer to EC/PID check
-            // if (e.Shiny != null && e.Shiny != pkm.IsShiny)
-            // continue;
-
-            // Defer ball check to later
-            // if (e.Gift && pkm.Ball != 4) // PokéBall
-            // continue;
-
-            if (pkm is PK1 pk1 && pk1.Gen1_NotTradeback)
-                if (!IsValidCatchRatePK1(e, pk1))
-                    return false;
-
-            if (!AllowGBCartEra && GameVersion.GBCartEraOnly.Contains(e.Version))
-                return false;
             return true;
         }
-        private static IEnumerable<EncounterStatic> GetStaticEncounters(PKM pkm, GameVersion gameSource = GameVersion.Any)
+
+        private static IEnumerable<EncounterStatic> GetStaticEncounters(PKM pkm, IReadOnlyList<DexLevel> dl, GameVersion gameSource = GameVersion.Any)
         {
             if (gameSource == GameVersion.Any)
                 gameSource = (GameVersion)pkm.Version;
 
             var table = GetEncounterStaticTable(pkm, gameSource);
-            switch (pkm.GenNumber)
-            {
-                case 1:
-                    return GetStatic(pkm, table, maxspeciesorigin: MaxSpeciesID_1);
-                case 2:
-                    return GetStatic(pkm, table, maxspeciesorigin: MaxSpeciesID_2);
-                default:
-                    return GetStatic(pkm, table);
-            }
-        }
-        private static IEnumerable<EncounterStatic> GetStatic(PKM pkm, IEnumerable<EncounterStatic> table, int maxspeciesorigin = -1, int lvl = -1, bool skip = false)
-        {
-            IEnumerable<DexLevel> dl = GetValidPreEvolutions(pkm, maxspeciesorigin: maxspeciesorigin, lvl: lvl, skipChecks: skip);
             return table.Where(e => dl.Any(d => d.Species == e.Species));
         }
 
@@ -202,41 +106,47 @@ namespace PKHeX.Core
                 return GetGSStaticTransfer(pkm.Species, pkm.Met_Level);
             return new EncounterInvalid(pkm);
         }
+
         private static EncounterStatic GetRBYStaticTransfer(int species, int pkmMetLevel)
         {
-            var enc = new EncounterStatic
+            bool mew = species == (int)Species.Mew;
+            return new EncounterStatic
             {
                 Species = species,
                 Gift = true, // Forces Poké Ball
                 Ability = TransferSpeciesDefaultAbility_1.Contains(species) ? 1 : 4, // Hidden by default, else first
-                Shiny = species == 151 ? (bool?)false : null,
-                Fateful = species == 151,
+                Shiny = mew ? Shiny.Never : Shiny.Random,
+                Fateful = mew,
                 Location = Transfer1,
                 EggLocation = 0,
                 Level = pkmMetLevel,
-                Version = GameVersion.RBY
+                Generation = 7,
+                Version = GameVersion.RBY,
+                FlawlessIVCount = mew ? 5 : 3,
             };
-            enc.FlawlessIVCount = enc.Fateful ? 5 : 3;
-            return enc;
         }
+
         private static EncounterStatic GetGSStaticTransfer(int species, int pkmMetLevel)
         {
-            var enc = new EncounterStatic
+            bool mew = species == (int) Species.Mew;
+            bool fateful = mew || species == (int) Species.Celebi;
+            return new EncounterStatic
             {
                 Species = species,
                 Gift = true, // Forces Poké Ball
                 Ability = TransferSpeciesDefaultAbility_2.Contains(species) ? 1 : 4, // Hidden by default, else first
-                Shiny = species == 151 ? (bool?)false : null,
-                Fateful = species == 151 || species == 251,
+                Shiny = mew ? Shiny.Never : Shiny.Random,
+                Fateful = fateful,
                 Location = Transfer2,
                 EggLocation = 0,
                 Level = pkmMetLevel,
-                Version = GameVersion.GSC
+                Generation = 7,
+                Version = GameVersion.GSC,
+                FlawlessIVCount = fateful ? 5 : 3
             };
-            enc.FlawlessIVCount = enc.Fateful ? 5 : 3;
-            return enc;
         }
-        internal static EncounterStatic GetStaticLocation(PKM pkm, int species = -1)
+
+        internal static EncounterStatic? GetStaticLocation(PKM pkm, int species = -1)
         {
             switch (pkm.GenNumber)
             {
@@ -245,8 +155,8 @@ namespace PKHeX.Core
                 case 2:
                     return GetGSStaticTransfer(species, pkm.Met_Level);
                 default:
-                    var table = GetEncounterStaticTable(pkm, (GameVersion)pkm.Version);
-                    return GetStatic(pkm, table, lvl: 100, skip: true).FirstOrDefault();
+                    var dl = EvolutionChain.GetValidPreEvolutions(pkm, lvl: 100, skipChecks: true);
+                    return GetPossible(pkm, dl).FirstOrDefault();
             }
         }
 
@@ -254,11 +164,12 @@ namespace PKHeX.Core
         {
             return pkm.Met_Location == e.Location && pkm.Egg_Location == e.EggLocation;
         }
+
         private static bool IsValidCatchRatePK1(EncounterStatic e, PK1 pk1)
         {
             var catch_rate = pk1.Catch_Rate;
             // Pure gen 1, trades can be filter by catch rate
-            if (pk1.Species == 25 || pk1.Species == 26)
+            if (pk1.Species == (int)Species.Pikachu || pk1.Species == (int)Species.Raichu)
             {
                 if (catch_rate == 190) // Red Blue Pikachu, is not a static encounter
                     return false;
@@ -269,15 +180,86 @@ namespace PKHeX.Core
             if (e.Version == GameVersion.Stadium)
             {
                 // Amnesia Psyduck has different catch rates depending on language
-                if (e.Species == 054)
+                if (e.Species == (int)Species.Psyduck)
                     return catch_rate == (pk1.Japanese ? 167 : 168);
-                return Stadium_CatchRate.Contains(catch_rate);
+                return GBRestrictions.Stadium_CatchRate.Contains(catch_rate);
             }
 
             // Encounters can have different Catch Rates (RBG vs Y)
             var table = e.Version == GameVersion.Y ? PersonalTable.Y : PersonalTable.RB;
             var rate = table[e.Species].CatchRate;
             return catch_rate == rate;
+        }
+
+        // Generation Specific Fetching
+        private static IEnumerable<EncounterStatic> GetEncounterStaticTable(PKM pkm, GameVersion gameSource = GameVersion.Any)
+        {
+            if (gameSource == GameVersion.Any)
+                gameSource = (GameVersion)pkm.Version;
+
+            switch (gameSource)
+            {
+                case GameVersion.RBY:
+                case GameVersion.RD:
+                case GameVersion.BU:
+                case GameVersion.GN:
+                case GameVersion.YW:
+                    return StaticRBY;
+
+                case GameVersion.GSC:
+                case GameVersion.GD:
+                case GameVersion.SV:
+                case GameVersion.C:
+                    return GetEncounterStaticTableGSC(pkm);
+
+                case GameVersion.R: return StaticR;
+                case GameVersion.S: return StaticS;
+                case GameVersion.E: return StaticE;
+                case GameVersion.FR: return StaticFR;
+                case GameVersion.LG: return StaticLG;
+                case GameVersion.CXD: return Encounter_CXD;
+
+                case GameVersion.D: return StaticD;
+                case GameVersion.P: return StaticP;
+                case GameVersion.Pt: return StaticPt;
+                case GameVersion.HG: return StaticHG;
+                case GameVersion.SS: return StaticSS;
+
+                case GameVersion.B: return StaticB;
+                case GameVersion.W: return StaticW;
+                case GameVersion.B2: return StaticB2;
+                case GameVersion.W2: return StaticW2;
+
+                case GameVersion.X: return StaticX;
+                case GameVersion.Y: return StaticY;
+                case GameVersion.AS: return StaticA;
+                case GameVersion.OR: return StaticO;
+
+                case GameVersion.SN: return StaticSN;
+                case GameVersion.MN: return StaticMN;
+                case GameVersion.US: return StaticUS;
+                case GameVersion.UM: return StaticUM;
+
+                case GameVersion.GP: return StaticGP;
+                case GameVersion.GE: return StaticGE;
+
+                case GameVersion.SW: return StaticSW;
+                case GameVersion.SH: return StaticSH;
+
+                default: return Enumerable.Empty<EncounterStatic>();
+            }
+        }
+
+        private static IEnumerable<EncounterStatic> GetEncounterStaticTableGSC(PKM pkm)
+        {
+            if (!ParseSettings.AllowGen2Crystal(pkm))
+                return StaticGS;
+            if (pkm.Format != 2)
+                return StaticGSC;
+
+            if (pkm.HasOriginalMetLocation)
+                return StaticC;
+            return StaticGSC;
         }
     }
 }

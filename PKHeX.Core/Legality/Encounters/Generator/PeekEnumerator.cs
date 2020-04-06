@@ -8,10 +8,10 @@ namespace PKHeX.Core
     /// Iterates a generic collection with the ability to peek into the collection to see if the next element exists.
     /// </summary>
     /// <typeparam name="T">Generic Collection Element Type</typeparam>
-    public class PeekEnumerator<T> : IEnumerator<T>
+    public sealed class PeekEnumerator<T> : IEnumerator<T> where T : class
     {
         private readonly IEnumerator<T> Enumerator;
-        private T peek;
+        private T? peek;
         private bool didPeek;
 
         #region IEnumerator Implementation
@@ -27,21 +27,23 @@ namespace PKHeX.Core
             didPeek = false;
             return true;
         }
+
         /// <summary>
         /// Sets the enumerator to its initial position, which is before the first element in the collection.
         /// </summary>
         public void Reset()
         {
             Enumerator.Reset();
+            peek = default;
             didPeek = false;
         }
 
-        object IEnumerator.Current => Current;
+        object? IEnumerator.Current => Current;
         public void Dispose() => Enumerator.Dispose();
-        public T Current => didPeek ? peek : Enumerator.Current;
+        public T Current => didPeek ? peek! : Enumerator.Current;
 
         #endregion
-        
+
         public PeekEnumerator(IEnumerator<T> enumerator) => Enumerator = enumerator ?? throw new ArgumentNullException(nameof(enumerator));
         public PeekEnumerator(IEnumerable<T> enumerable) => Enumerator = enumerable.GetEnumerator();
 
@@ -67,9 +69,10 @@ namespace PKHeX.Core
             if (!TryFetchPeek())
                 throw new InvalidOperationException("Enumeration already finished.");
 
-            return peek;
+            return peek!;
         }
-        public T PeekOrDefault() => !TryFetchPeek() ? default(T) : peek;
+
+        public T? PeekOrDefault() => !TryFetchPeek() ? default : peek;
 
         /// <summary>
         /// Checks if a Next element exists

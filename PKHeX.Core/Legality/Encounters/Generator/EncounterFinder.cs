@@ -17,42 +17,40 @@ namespace PKHeX.Core
         /// <param name="pkm">Source data to find a match for</param>
         /// <returns>
         /// Information containing the matched encounter and any parsed checks.
-        /// If no clean match is found, the last checked match is returned. 
+        /// If no clean match is found, the last checked match is returned.
         /// If no match is found, an invalid encounter object is returned.
         /// </returns>
         public static LegalInfo FindVerifiedEncounter(PKM pkm)
         {
-            LegalInfo info = new LegalInfo(pkm);
+            var info = new LegalInfo(pkm);
             var encounters = EncounterGenerator.GetEncounters(pkm, info);
 
-            using (var encounter = new PeekEnumerator<IEncounterable>(encounters))
+            using var encounter = new PeekEnumerator<IEncounterable>(encounters);
+            if (!encounter.PeekIsNext())
+                return VerifyWithoutEncounter(pkm, info);
+
+            var EncounterValidator = EncounterVerifier.GetEncounterVerifierMethod(pkm);
+            while (encounter.MoveNext())
             {
-                if (!encounter.PeekIsNext())
-                    return VerifyWithoutEncounter(pkm, info);
-
-                var EncounterValidator = EncounterVerifier.GetEncounterVerifierMethod(pkm);
-                while (encounter.MoveNext())
+                info.EncounterMatch = encounter.Current;
+                var e = EncounterValidator(pkm, info);
+                if (!e.Valid && encounter.PeekIsNext())
                 {
-                    info.EncounterMatch = encounter.Current;
-                    var e = EncounterValidator(pkm, info);
-                    if (!e.Valid && encounter.PeekIsNext())
-                    {
-                        info.Reject(e);
-                        continue;
-                    }
-                    info.Parse.Add(e);
-
-                    if (VerifySecondaryChecks(pkm, info, encounter))
-                        break; // passes
+                    info.Reject(e);
+                    continue;
                 }
+                info.Parse.Add(e);
 
-                if (!info.FrameMatches && info.EncounterMatch is EncounterSlot && pkm.Version != (int)GameVersion.CXD) // if false, all valid RNG frame matches have already been consumed
-                    info.Parse.Add(new CheckResult(Severity.Fishy, V400, CheckIdentifier.PID)); // todo for further confirmation
-                if (!info.PIDIVMatches) // if false, all valid PIDIV matches have already been consumed
-                    info.Parse.Add(new CheckResult(Severity.Invalid, V411, CheckIdentifier.PID));
-
-                return info;
+                if (VerifySecondaryChecks(pkm, info, encounter))
+                    break; // passes
             }
+
+            if (!info.FrameMatches && info.EncounterMatch is EncounterSlot && pkm.Version != (int)GameVersion.CXD) // if false, all valid RNG frame matches have already been consumed
+                info.Parse.Add(new CheckResult(ParseSettings.RNGFrameNotFound, LEncConditionBadRNGFrame, CheckIdentifier.PID)); // todo for further confirmation
+            if (!info.PIDIVMatches) // if false, all valid PIDIV matches have already been consumed
+                info.Parse.Add(new CheckResult(Severity.Invalid, LPIDTypeMismatch, CheckIdentifier.PID));
+
+            return info;
         }
 
         /// <summary>
@@ -76,8 +74,10 @@ namespace PKHeX.Core
                     return false;
             }
             else
+            {
                 for (int i = 0; i < 4; i++)
                     info.Relearn[i] = new CheckResult(CheckIdentifier.RelearnMove);
+            }
 
             info.Moves = VerifyCurrentMoves.VerifyMoves(pkm, info);
             if (info.Moves.Any(z => !z.Valid) && iterator.PeekIsNext())
@@ -100,21 +100,23 @@ namespace PKHeX.Core
         private static LegalInfo VerifyWithoutEncounter(PKM pkm, LegalInfo info)
         {
             info.EncounterMatch = new EncounterInvalid(pkm);
-
-            string hint; // hint why an encounter was not found
-            if (pkm.WasGiftEgg)
-                hint = V359; 
-            else if (pkm.WasEventEgg)
-                hint = V360;
-            else if (pkm.WasEvent)
-                hint = V78;
-            else
-                hint = V80;
+            string hint = GetHintWhyNotFound(pkm);
 
             info.Parse.Add(new CheckResult(Severity.Invalid, hint, CheckIdentifier.Encounter));
             info.Relearn = VerifyRelearnMoves.VerifyRelearn(pkm, info);
             info.Moves = VerifyCurrentMoves.VerifyMoves(pkm, info);
             return info;
+        }
+
+        private static string GetHintWhyNotFound(PKM pkm)
+        {
+            if (pkm.WasGiftEgg)
+                return LEncGift;
+            if (pkm.WasEventEgg)
+                return LEncGiftEggEvent;
+            if (pkm.WasEvent)
+                return LEncGiftNotFound;
+            return LEncInvalid;
         }
     }
 }

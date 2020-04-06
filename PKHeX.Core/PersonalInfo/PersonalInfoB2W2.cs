@@ -1,20 +1,17 @@
 ﻿namespace PKHeX.Core
 {
     /// <summary>
-    /// <see cref="PersonalInfo"/> class with values from the Black 2 & White 2 games.
+    /// <see cref="PersonalInfo"/> class with values from the Black 2 &amp; White 2 games.
     /// </summary>
-    public class PersonalInfoB2W2 : PersonalInfoBW
+    public sealed class PersonalInfoB2W2 : PersonalInfoBW
     {
         public new const int SIZE = 0x4C;
-        public PersonalInfoB2W2(byte[] data)
-        {
-            if (data.Length != SIZE)
-                return;
-            Data = data;
 
+        public PersonalInfoB2W2(byte[] data) : base(data)
+        {
             // Unpack TMHM & Tutors
             TMHM = GetBits(Data, 0x28, 0x10);
-            TypeTutors = GetBits(Data, 0x3, 0x4);
+            TypeTutors = GetBits(Data, 0x38, 0x4);
             SpecialTutors = new[]
             {
                 GetBits(Data, 0x3C, 0x04),
