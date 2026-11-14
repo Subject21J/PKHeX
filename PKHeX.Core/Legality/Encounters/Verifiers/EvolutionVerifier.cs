@@ -1,46 +1,57 @@
-﻿using System.Linq;
-using static PKHeX.Core.LegalityCheckStrings;
+using static PKHeX.Core.EvolutionRestrictions;
+using static PKHeX.Core.LegalityCheckResultCode;
 
-namespace PKHeX.Core
+namespace PKHeX.Core;
+
+/// <summary>
+/// Verify Evolution Information for a matched <see cref="IEncounterable"/>
+/// </summary>
+public static class EvolutionVerifier
 {
-    /// <summary>
-    /// Verify Evolution Information for a matched <see cref="IEncounterable"/>
-    /// </summary>
-    public static class EvolutionVerifier
-    {
-        /// <summary>
-        /// Verifies Evolution scenarios of an <see cref="IEncounterable"/> for an input <see cref="PKM"/> and relevant <see cref="LegalInfo"/>.
-        /// </summary>
-        /// <param name="pkm">Source data to verify</param>
-        /// <param name="info">Source supporting information to verify with</param>
-        /// <returns></returns>
-        public static CheckResult VerifyEvolution(PKM pkm, LegalInfo info)
-        {
-            return IsValidEvolution(pkm, info) 
-                ? new CheckResult(CheckIdentifier.Evolution) 
-                : new CheckResult(Severity.Invalid, V86, CheckIdentifier.Evolution);
-        }
+    private static readonly CheckResult VALID = CheckResult.GetValid(CheckIdentifier.Evolution);
 
-        /// <summary>
-        /// Checks if the Evolution from the source <see cref="IEncounterable"/> is valid.
-        /// </summary>
-        /// <param name="pkm">Source data to verify</param>
-        /// <param name="info">Source supporting information to verify with</param>
-        /// <returns>Evolution is valid or not</returns>
-        private static bool IsValidEvolution(PKM pkm, LegalInfo info)
-        {
-            int species = pkm.Species;
-            if (info.EncounterMatch.Species == species)
-                return true;
-            if (info.EncounterMatch.EggEncounter && species == 350 && pkm.Format >= 5 && !pkm.IsUntraded) // Prism Scale
-                return true;
-            if (!Legal.IsEvolutionValid(pkm, info.EncounterMatch.Species))
-                return false;
-            // If current species evolved with a move evolution and encounter species is not current species check if the evolution by move is valid
-            // Only the evolution by move is checked, if there is another evolution before the evolution by move is covered in IsEvolutionValid
-            if (Legal.SpeciesEvolutionWithMove.Contains(pkm.Species))
-                return Legal.IsEvolutionValidWithMove(pkm, info);
-            return true;
-        }
+    /// <summary>
+    /// Verifies Evolution scenarios of <see cref="IEncounterable"/> templates for an input <see cref="PKM"/> and relevant <see cref="LegalInfo"/>.
+    /// </summary>
+    /// <param name="pk">Source data to verify</param>
+    /// <param name="info">Source supporting information to verify with</param>
+    public static CheckResult VerifyEvolution(PKM pk, LegalInfo info)
+    {
+        // Check if basic evolution methods are satisfiable with this encounter.
+        if (!IsValidEvolution(pk, info.EvoChainsAllGens, info.EncounterOriginal))
+            return CheckResult.Get(Severity.Invalid, CheckIdentifier.Evolution, EvoInvalid);
+
+        // Check if complex evolution methods are satisfiable with this encounter.
+        if (!IsValidEvolutionWithMove(pk, info))
+            return CheckResult.Get(Severity.Invalid, CheckIdentifier.Evolution, MoveEvoFCombination_0, pk.Species);
+
+        return VALID;
+    }
+
+    /// <summary>
+    /// Checks if the Evolution from the source <see cref="IEncounterable"/> is valid.
+    /// </summary>
+    /// <param name="pk">Source data to verify</param>
+    /// <param name="history">Source supporting information to verify with</param>
+    /// <param name="enc">Matched encounter</param>
+    /// <returns>Evolution is valid or not</returns>
+    private static bool IsValidEvolution(PKM pk, EvolutionHistory history, IEncounterTemplate enc)
+    {
+        // OK if un-evolved from original encounter
+        var encSpecies = enc.Species;
+        var curSpecies = pk.Species;
+        if (curSpecies == encSpecies)
+            return true; // never evolved
+
+        var current = history.Get(pk.Context);
+        if (!EvolutionHistory.HasVisited(current, curSpecies))
+            return false; // Can't exist as current species
+
+        // Double check that our encounter was able to exist as the encounter species.
+        var original = history.Get(enc.Context);
+        if (!EvolutionHistory.HasVisited(original, encSpecies))
+            return false;
+
+        return true;
     }
 }

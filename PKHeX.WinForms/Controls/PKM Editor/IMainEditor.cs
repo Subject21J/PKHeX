@@ -1,17 +1,20 @@
 using System;
 using PKHeX.Core;
 
-namespace PKHeX.WinForms.Controls
+namespace PKHeX.WinForms.Controls;
+
+public interface IMainEditor : IPKMView
 {
-    public interface IMainEditor
-    {
-        bool Unicode { get; }
-        bool FieldsInitialized { get; }
-        bool ChangingFields { get; set; }
-        bool HaX { get; }
+    PKM Entity { get; }
+    SaveFile RequestSaveFile { get; }
 
-        PKM pkm { get; }
+    void UpdateIVsGB(bool skipForm);
+    void ChangeNature(Nature newNature);
+}
 
-        void UpdateIVsGB(bool skipForm);
-    }
+[Flags]
+public enum UpdateLegalityArgs
+{
+    None,
+    SkipMoveRepopulation = 1 << 0,
 }
